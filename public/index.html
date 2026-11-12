@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>Santino</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#131a22; --line:#232d39; --text:#e9eef4; --dim:#8794a3; --gold:#e8b04a; --ok:#4fbf8b; --no:#e0655f; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; }
+  body { background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:10px; padding:calc(12px + env(safe-area-inset-top)) 16px 12px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:17px; margin:0; letter-spacing:.04em; flex:1; }
+  header h1 span { color:var(--gold); }
+  .chip { font-size:12px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:4px 10px; background:none; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  #log { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+  .msg { max-width:86%; padding:10px 14px; border-radius:16px; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .user { align-self:flex-end; background:var(--gold); color:#1a1304; border-bottom-right-radius:4px; }
+  .assistant { align-self:flex-start; background:var(--panel); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .note { align-self:center; color:var(--dim); font-size:13px; text-align:center; }
+  .card { align-self:stretch; background:var(--panel); border:1px solid var(--gold); border-radius:14px; padding:12px 14px; }
+  .card small { color:var(--gold); text-transform:uppercase; letter-spacing:.08em; font-size:11px; }
+  .card pre { margin:6px 0 12px; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; }
+  .card .row { display:flex; gap:8px; }
+  .card button { flex:1; border:0; border-radius:10px; padding:10px; font-weight:600; }
+  .yes { background:var(--ok); color:#04170e; } .nope { background:transparent; border:1px solid var(--line) !important; color:var(--no); }
+  .ping { align-self:stretch; background:#16202b; border:1px solid var(--line); border-radius:12px; padding:10px 14px; display:flex; gap:10px; align-items:flex-start; }
+  .ping button { background:none; border:0; color:var(--dim); margin-inline-start:auto; }
+  footer { border-top:1px solid var(--line); padding:10px 12px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:8px; align-items:flex-end; }
+  textarea { flex:1; resize:none; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:14px; padding:11px 14px; font:inherit; max-height:120px; }
+  textarea:focus, button:focus-visible, input:focus { outline:2px solid var(--gold); outline-offset:1px; }
+  .round { width:48px; height:48px; border-radius:50%; border:1px solid var(--line); background:var(--panel); font-size:20px; flex:none; }
+  #mic.rec { background:var(--no); border-color:var(--no); animation:pulse 1.1s infinite; }
+  #mic:disabled { opacity:.35; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 10px rgba(224,101,95,.15); } }
+  @media (prefers-reduced-motion: reduce) { #mic.rec { animation:none; } }
+  #login { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; }
+  #login input { width:min(320px,100%); background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:12px; padding:12px 14px; font:inherit; }
+  #login button { width:min(320px,100%); background:var(--gold); color:#1a1304; border:0; border-radius:12px; padding:12px; font-weight:700; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SANT<span>I</span>NO</h1>
+  <button class="chip" id="google" hidden>Connect Google</button>
+  <button class="chip" id="speak" aria-pressed="true">🔊 On</button>
+</header>
+
+<main id="log" aria-live="polite"></main>
+
+<footer>
+  <button class="round" id="mic" aria-label="Record voice">🎙</button>
+  <textarea id="text" rows="1" dir="auto" placeholder="اكتب أو اتكلم… / Type or talk…"></textarea>
+  <button class="round" id="send" aria-label="Send">➤</button>
+</footer>
+
+<form id="login" hidden>
+  <h1 style="letter-spacing:.2em">SANTINO</h1>
+  <input id="pass" type="password" placeholder="Passcode" autocomplete="current-password" required>
+  <button>Enter</button>
+  <div class="note" id="loginErr"></div>
+</form>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log"), text = $("text"), mic = $("mic");
+let token = null, speakOn = true;
+try { token = localStorage.getItem("santino_token"); speakOn = localStorage.getItem("santino_speak") !== "0"; } catch {}
+const shown = new Set();
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { authorization: "Bearer " + token, ...(opts.headers || {}) } });
+  if (res.status === 401) { showLogin(); throw new Error("Please log in"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Request failed (" + res.status + ")");
+  return data;
+}
+
+function add(cls, content) {
+  const el = document.createElement("div");
+  el.className = cls; el.dir = "auto"; el.textContent = content;
+  log.appendChild(el); log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+function say(t) {
+  if (!speakOn || !("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t);
+  u.lang = /[؀-ۿ]/.test(t) ? "ar-EG" : "en-US";
+  speechSynthesis.speak(u);
+}
+
+async function send(msg) {
+  msg = msg.trim(); if (!msg) return;
+  add("msg user", msg);
+  const wait = add("note", "…");
+  try {
+    const { reply } = await api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: msg }) });
+    wait.remove(); add("msg assistant", reply); say(reply);
+  } catch (e) { wait.textContent = e.message; }
+  pollInbox();
+}
+
+function approvalCard(a) {
+  const el = document.createElement("div"); el.className = "card"; el.dir = "auto";
+  const tag = document.createElement("small"); tag.textContent = "Needs your approval";
+  const body = document.createElement("pre"); body.textContent = a.summary;
+  const row = document.createElement("div"); row.className = "row";
+  const mk = (label, cls, action) => {
+    const b = document.createElement("button"); b.className = cls; b.textContent = label;
+    b.onclick = async () => {
+      row.querySelectorAll("button").forEach((x) => (x.disabled = true));
+      try { const r = await api(`/api/approvals/${a.id}/${action}`, { method: "POST" }); row.replaceWith(Object.assign(document.createElement("div"), { className: "note", textContent: r.message })); }
+      catch (e) { row.replaceWith(Object.assign(document.createElement("div"), { className: "note", textContent: e.message })); }
+    };
+    return b;
+  };
+  row.append(mk("Approve ✓", "yes", "approve"), mk("Reject", "nope", "reject"));
+  el.append(tag, body, row); log.appendChild(el); log.scrollTop = log.scrollHeight;
+}
+
+function ping(n) {
+  const el = document.createElement("div"); el.className = "ping"; el.dir = "auto";
+  const t = document.createElement("div"); t.textContent = (n.kind === "reminder" ? "⏰ " : n.kind === "whatsapp" ? "💬 " : "📌 ") + n.text;
+  const x = document.createElement("button"); x.textContent = "✕"; x.setAttribute("aria-label", "Dismiss");
+  x.onclick = () => { el.remove(); api(`/api/notifications/${n.id}/read`, { method: "POST" }).catch(() => {}); };
+  el.append(t, x); log.appendChild(el); log.scrollTop = log.scrollHeight;
+  if (n.kind === "reminder") say(n.text);
+}
+
+async function pollInbox() {
+  if (!token) return;
+  try {
+    const { approvals, notifications } = await api("/api/inbox");
+    for (const a of approvals) if (!shown.has("a" + a.id)) { shown.add("a" + a.id); approvalCard(a); }
+    for (const n of notifications) if (!shown.has("n" + n.id)) { shown.add("n" + n.id); ping(n); }
+  } catch {}
+}
+
+// ---- voice: tap to start, tap to stop ----
+let rec = null, chunks = [];
+mic.onclick = async () => {
+  if (rec) { rec.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    rec = new MediaRecorder(stream); chunks = [];
+    rec.ondataavailable = (e) => chunks.push(e.data);
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: rec.mimeType }); rec = null; mic.classList.remove("rec");
+      const wait = add("note", "Listening…");
+      try {
+        const { text: heard } = await api("/api/transcribe", { method: "POST", headers: { "content-type": blob.type }, body: blob });
+        wait.remove(); if (heard) send(heard); else add("note", "Didn't catch that.");
+      } catch (e) { wait.textContent = e.message; }
+    };
+    rec.start(); mic.classList.add("rec");
+  } catch { add("note", "Microphone permission is needed for voice."); }
+};
+
+$("send").onclick = () => { send(text.value); text.value = ""; text.style.height = "auto"; };
+text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("send").click(); } });
+text.addEventListener("input", () => { text.style.height = "auto"; text.style.height = text.scrollHeight + "px"; });
+
+const speakBtn = $("speak");
+const paintSpeak = () => { speakBtn.textContent = speakOn ? "🔊 On" : "🔇 Off"; speakBtn.setAttribute("aria-pressed", speakOn); };
+speakBtn.onclick = () => { speakOn = !speakOn; try { localStorage.setItem("santino_speak", speakOn ? "1" : "0"); } catch {} if (!speakOn) speechSynthesis.cancel(); paintSpeak(); };
+paintSpeak();
+
+$("google").onclick = async () => { try { const { url } = await api("/api/google/connect"); location.href = url; } catch (e) { add("note", e.message); } };
+
+function showLogin() { token = null; try { localStorage.removeItem("santino_token"); } catch {} $("login").hidden = false; }
+$("login").onsubmit = async (e) => {
+  e.preventDefault();
+  const res = await fetch("/api/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ passcode: $("pass").value }) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { $("loginErr").textContent = data.error || "Login failed"; return; }
+  token = data.token; try { localStorage.setItem("santino_token", token); } catch {}
+  $("login").hidden = true; start();
+};
+
+async function start() {
+  try {
+    const [{ messages }, status] = await Promise.all([api("/api/history"), api("/api/status")]);
+    log.textContent = "";
+    for (const m of messages) add("msg " + m.role, m.content);
+    if (!messages.length) add("note", "أهلاً! قولي محتاج إيه. / Tell me what you need.");
+    $("google").hidden = status.google;
+    mic.disabled = !status.voice; if (!status.voice) mic.title = "Voice not configured yet";
+    pollInbox();
+  } catch {}
+}
+
+if (token) start(); else showLogin();
+setInterval(pollInbox, 20000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) pollInbox(); });
+</script>
+</body>
+</html>
