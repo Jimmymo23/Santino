@@ -17,6 +17,7 @@ Each sprint ends with something Jimmy can use. Verify each step before moving on
 - [ ] Rate-limit /api/login.
 
 ## Sprint 2 — Voice quality
+- [ ] Review the HUD on a real phone and desktop; tune sizes and motion.
 - [ ] Compare 2-3 STT providers on real Egyptian Arabic + English recordings.
 - [ ] Neural TTS with a consistent voice, Arabic and English.
 - [ ] Hands-free mode: auto-stop on silence, auto-listen after reply.
@@ -31,7 +32,7 @@ Each sprint ends with something Jimmy can use. Verify each step before moving on
 
 ## Sprint 4 — Proactive
 - [ ] Web Push notifications.
-- [ ] Morning brief at a configurable time.
+- [x] Morning brief at a configurable time (`BRIEF_HOUR`, in-app; push comes with Web Push).
 - [ ] Email triage digest with suggested replies.
 - [ ] Long-term memory table + retrieval.
 

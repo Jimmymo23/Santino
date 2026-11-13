@@ -40,7 +40,8 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
 - `src/tools.ts` tool registry + task/reminder/team tools
 - `src/google.ts` OAuth, Gmail, Calendar, Sheets
 - `src/whatsapp.ts` send + webhook
-- `src/cron.ts` reminders and follow-ups
+- `src/brief.ts` day snapshot for HUD tiles and briefs
+- `src/cron.ts` reminders, follow-ups, morning brief
 - `public/` the app
 
 ## Start here
