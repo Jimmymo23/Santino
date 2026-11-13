@@ -26,6 +26,15 @@ and executes them after a spoken or tapped approval.
 ## Capabilities by phase
 
 ### Phase 1 — Core (this starter)
+- HUD interface: reactive core (standby / listening / processing / speaking),
+  live tiles (open, overdue, due today, meetings, unread, to approve),
+  link indicators, quick commands.
+- Thinking partner: open conversation and planning, then converts agreed
+  plans into tasks, reminders, meetings and messages.
+- Briefs and summaries on demand ("brief me", "my day", "inbox", "team
+  status") built from one `day_snapshot` tool, never invented.
+- Automatic morning brief at `BRIEF_HOUR` (default 08:00 Cairo), spoken when
+  the app is opened.
 - Chat by text and voice (record -> transcribe -> reply -> speak).
 - Tasks: create, assign to a team member, due dates, status, notes.
 - Reminders at a time.
@@ -39,7 +48,7 @@ and executes them after a spoken or tapped approval.
   drafted and placed in the approval queue.
 
 ### Phase 2 — Proactive
-- Morning brief (agenda, urgent email, overdue tasks) pushed at a set time.
+- Morning brief delivered as a push notification (currently shown in-app).
 - Web Push notifications to phone and laptop.
 - Email triage: daily digest, suggested replies awaiting approval.
 - Meeting scheduling across attendees' free/busy.

@@ -1,5 +1,7 @@
+import { runAgent } from "./agent";
+import { todayBounds } from "./brief";
 import { queueApproval } from "./tools";
-import { type Env, notify, now } from "./types";
+import { type Env, kvGet, kvSet, notify, now } from "./types";
 
 export async function runCron(env: Env): Promise<void> {
   const t = now();
@@ -33,6 +35,17 @@ export async function runCron(env: Env): Promise<void> {
       await notify(env, "followup", `Follow-up to ${f.name} on "${f.title}" is waiting for your approval.`);
     } else {
       await notify(env, "followup", `Time to follow up on "${f.title}".`);
+    }
+  }
+
+  // 3. Morning brief, once a day at BRIEF_HOUR local time.
+  const { ymd, hour } = todayBounds(env);
+  if (hour === Number(env.BRIEF_HOUR ?? "8") && (await kvGet(env, "last_brief")) !== ymd) {
+    await kvSet(env, "last_brief", ymd); // mark first so a failure cannot loop
+    try {
+      await notify(env, "brief", await runAgent(env, "Morning brief."));
+    } catch (e) {
+      await notify(env, "brief", `Morning brief failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 }

@@ -6,6 +6,8 @@ export interface Env {
   CLAUDE_MODEL?: string;
   OWNER_NAME?: string;
   TIMEZONE?: string;
+  /** Local hour (0-23) for the automatic morning brief. Default 8. */
+  BRIEF_HOUR?: string;
   APP_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
