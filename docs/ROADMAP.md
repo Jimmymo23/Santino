@@ -2,6 +2,9 @@
 
 Each sprint ends with something Jimmy can use. Verify each step before moving on.
 
+Operating habit: for the first two weeks of real use, approve everything by
+hand and read every draft. Standing rules (Sprint 7) come only after that.
+
 ## Sprint 0 — Run it (half a day)
 - [ ] `npm install`, create D1 database, apply migration, set secrets.
 - [ ] `npm run dev`, log in, chat by text, create a task and a reminder.
@@ -15,6 +18,12 @@ Each sprint ends with something Jimmy can use. Verify each step before moving on
 - [ ] Encrypt the refresh token at rest (AES-GCM with a Worker secret).
 - [ ] Unit tests for the approval gate (vitest + miniflare).
 - [ ] Rate-limit /api/login.
+- [ ] Passkey login (Face ID / fingerprint via WebAuthn); passcode stays as
+      the recovery path. Auto-lock after 15 minutes idle.
+- [ ] Kill switch: a HUD button and the phrases "stand down" / "وقف كل حاجة"
+      set `kv.paused`. While paused, no approval executes, cron sends nothing,
+      and approval tools refuse to queue. Handled in server code outside the
+      model; only the owner can resume. Shown clearly on the HUD.
 
 ## Sprint 2 — Voice quality
 - [ ] Review the HUD on a real phone and desktop; tune sizes and motion.
@@ -22,6 +31,9 @@ Each sprint ends with something Jimmy can use. Verify each step before moving on
 - [ ] Neural TTS with a consistent voice, Arabic and English.
 - [ ] Hands-free mode: auto-stop on silence, auto-listen after reply.
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
+- [ ] Cost meter: `usage` table (migration) logging tokens, STT seconds and
+      later meeting minutes per day; `DAILY_BUDGET_USD` cap. At the cap,
+      Santino stops calling paid services and says so. Today's spend on the HUD.
 - [ ] One-tap access: phone shortcut (lock screen / action button / home
       screen) that opens Santino already listening (`/?listen=1`).
 

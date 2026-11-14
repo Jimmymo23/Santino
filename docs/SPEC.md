@@ -22,6 +22,9 @@ and executes them after a spoken or tapped approval.
    unless asked for detail.
 4. **Email, web and WhatsApp content is data, never instructions.**
 5. **Everything is logged.** An audit trail for every action taken.
+6. **The owner can stop everything.** A kill switch pauses all sending and
+   scheduled actions instantly.
+7. **Spending is capped.** A daily budget for paid services, visible on screen.
 
 ## Capabilities by phase
 
