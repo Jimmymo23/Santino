@@ -15,7 +15,9 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 - [x] Create Google Cloud OAuth client (project `santino-2388`, Internal to
       the thegreenpenguin.net Workspace), connect account via GGL. Setup helper:
       `npm run google:setup`.
-- [ ] Test gmail_search / gmail_read / gmail_send (approval) end to end.
+- [x] Test gmail_search / gmail_read / gmail_send (approval) end to end
+      (owner confirmed: brief from live inbox and calendar, test email sent
+      only after Authorize).
 - [ ] Test calendar_agenda / calendar_create.
 - [ ] Test expense_add creating the sheet on first use.
 - [ ] Encrypt the refresh token at rest (AES-GCM with a Worker secret).
