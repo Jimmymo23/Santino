@@ -8,7 +8,7 @@ directory = "./public"
 [[d1_databases]]
 binding = "DB"
 database_name = "santino"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "4cd06d64-1430-42ce-b9c7-5a4eb13b3e27"
 migrations_dir = "migrations"
 
 [triggers]
