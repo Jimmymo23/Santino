@@ -7,8 +7,10 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 
 ## Sprint 0 — Run it (half a day)
 - [ ] `npm install`, create D1 database, apply migration, set secrets.
+      (done: install, D1 `santino`, migration; secrets pending)
 - [ ] `npm run dev`, log in, chat by text, create a task and a reminder.
-- [ ] Deploy to `santino.jimmymo.online` (or chosen subdomain).
+- [x] Deploy: live at https://santino.mohamed-gsmart.workers.dev
+- [ ] Optional: custom domain `santino.jimmymo.online`.
 
 ## Sprint 1 — Google + hardening
 - [ ] Create Google Cloud OAuth client, connect account via Settings.
