@@ -12,7 +12,9 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 - [ ] Optional: custom domain `santino.jimmymo.online`.
 
 ## Sprint 1 — Google + hardening
-- [ ] Create Google Cloud OAuth client, connect account via Settings.
+- [x] Create Google Cloud OAuth client (project `santino-2388`, Internal to
+      the thegreenpenguin.net Workspace), connect account via GGL. Setup helper:
+      `npm run google:setup`.
 - [ ] Test gmail_search / gmail_read / gmail_send (approval) end to end.
 - [ ] Test calendar_agenda / calendar_create.
 - [ ] Test expense_add creating the sheet on first use.
