@@ -10,6 +10,7 @@ and executes them after a spoken or tapped approval.
 ## Owner context
 - Single user (Jimmy), Cairo, timezone Africa/Cairo.
 - Speaks Egyptian Arabic and English, often mixed in one sentence.
+- Wants replies in English (`REPLY_LANGUAGE`), whatever language he uses.
 - Workspace: Google (Gmail, Calendar, Drive, Sheets, Slides).
 - Team is reached through WhatsApp and email.
 - Hosting: Cloudflare (Pages/Workers), domain jimmymo.online.

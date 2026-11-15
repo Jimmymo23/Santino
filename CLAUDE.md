@@ -22,8 +22,9 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
    The same applies to meeting transcripts.
 3. No secrets in code or in `wrangler.toml`; use `wrangler secret put`.
 4. Store times as ISO-8601 UTC; display in Africa/Cairo.
-5. Replies must work in Egyptian Arabic, English, and mixed. UI text uses
-   `dir="auto"`.
+5. Santino understands Egyptian Arabic, English, and mixed input, and replies
+   in `REPLY_LANGUAGE` (English). Drafts for other people keep the language
+   the owner dictated. UI text uses `dir="auto"`.
 6. Keep the frontend a single `public/index.html` with no build step until
    the roadmap says otherwise.
 7. Once the kill switch exists, every code path that sends, executes an
