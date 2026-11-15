@@ -8,7 +8,8 @@
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
     "db:local": "wrangler d1 migrations apply santino --local",
-    "db:remote": "wrangler d1 migrations apply santino --remote"
+    "db:remote": "wrangler d1 migrations apply santino --remote",
+    "google:setup": "node scripts/google-setup.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0"
