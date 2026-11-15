@@ -42,7 +42,11 @@ interface Block {
   input?: unknown;
 }
 
-async function callClaude(env: Env, messages: unknown[]): Promise<{ content: Block[]; stop_reason: string }> {
+async function callClaude(
+  env: Env,
+  system: string,
+  messages: unknown[],
+): Promise<{ content: Block[]; stop_reason: string }> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -53,7 +57,7 @@ async function callClaude(env: Env, messages: unknown[]): Promise<{ content: Blo
     body: JSON.stringify({
       model: env.CLAUDE_MODEL ?? "claude-sonnet-5-5",
       max_tokens: 2000,
-      system: systemPrompt(env),
+      system,
       tools: tools.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
       messages,
     }),
@@ -77,9 +81,14 @@ export async function runAgent(env: Env, userText: string): Promise<string> {
   const messages: { role: string; content: unknown }[] = history.results.reverse();
   messages.push({ role: "user", content: userText });
 
+  // Build the system prompt once per turn. It contains the current time, and the
+  // API rejects a tool loop whose system prompt changes between calls, because
+  // the model's thinking blocks are bound to the exact prompt they were made with.
+  const system = systemPrompt(env);
+
   let reply = "";
   for (let step = 0; step < 8; step++) {
-    const res = await callClaude(env, messages);
+    const res = await callClaude(env, system, messages);
     reply = res.content
       .filter((b) => b.type === "text")
       .map((b) => b.text)
