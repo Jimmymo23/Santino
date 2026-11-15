@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { runAgent, saveTurn } from "./agent";
 import { safeEqual, signToken, verifyToken } from "./auth";
+import { snapshot } from "./brief";
 import { runCron } from "./cron";
 import { googleAuthUrl, googleConnected, googleExchangeCode } from "./google";
 import { resolveApproval } from "./tools";
@@ -52,8 +53,22 @@ app.get("/api/status", async (c) =>
     google: await googleConnected(c.env),
     whatsapp: Boolean(c.env.WHATSAPP_TOKEN && c.env.WHATSAPP_PHONE_ID),
     voice: Boolean(c.env.STT_URL),
+    owner: c.env.OWNER_NAME ?? "",
   }),
 );
+
+app.get("/api/dashboard", async (c) => {
+  const s = await snapshot(c.env);
+  return c.json({
+    open: s.tasks.open,
+    overdue: s.tasks.overdue.length,
+    due_today: s.tasks.due_today.length,
+    meetings: s.google_connected ? s.agenda_today.length : null,
+    unread: s.google_connected ? s.unread_email.length : null,
+    approvals: s.approvals_pending,
+    next_reminder: s.reminders[0] ?? null,
+  });
+});
 
 app.post("/api/chat", async (c) => {
   const { text } = await c.req.json<{ text?: string }>();

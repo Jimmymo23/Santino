@@ -18,5 +18,6 @@ crons = ["*/5 * * * *"]
 APP_URL = "http://localhost:8787"
 OWNER_NAME = "Jimmy"
 TIMEZONE = "Africa/Cairo"
+BRIEF_HOUR = "8"
 CLAUDE_MODEL = "claude-sonnet-5-5"
 WHATSAPP_API_VERSION = "v21.0"

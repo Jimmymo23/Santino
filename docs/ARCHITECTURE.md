@@ -39,7 +39,7 @@ the main defence against prompt injection from email or WhatsApp content.
   The STT provider is configurable; it must handle Egyptian Arabic with
   English code-switching. Evaluate providers in Sprint 2.
 - Output: browser `speechSynthesis` for now; swap for a neural TTS later.
-- Phase 4: streaming realtime voice over WebSocket (Durable Object).
+- Phase 6: streaming realtime voice over WebSocket (Durable Object).
 
 ## Conversation memory
 Only final user/assistant text is stored (`messages`), last 20 turns are sent.
