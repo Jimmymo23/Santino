@@ -20,15 +20,18 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       only after Authorize).
 - [ ] Test calendar_agenda / calendar_create.
 - [ ] Test expense_add creating the sheet on first use.
-- [ ] Encrypt the refresh token at rest (AES-GCM with a Worker secret).
+- [x] Encrypt the Google tokens and cached inbox snapshot at rest (AES-GCM,
+      key derived from `SESSION_SECRET`; legacy plaintext upgrades on first read).
 - [ ] Unit tests for the approval gate (vitest + miniflare).
-- [ ] Rate-limit /api/login.
-- [ ] Passkey login (Face ID / fingerprint via WebAuthn); passcode stays as
-      the recovery path. Auto-lock after 15 minutes idle.
-- [ ] Kill switch: a HUD button and the phrases "stand down" / "وقف كل حاجة"
-      set `kv.paused`. While paused, no approval executes, cron sends nothing,
-      and approval tools refuse to queue. Handled in server code outside the
-      model; only the owner can resume. Shown clearly on the HUD.
+- [x] Rate-limit logins: 5 failures per IP and 30 overall per 15 minutes.
+- [x] Passkey login (Face ID / fingerprint via WebAuthn, ES256, single-use
+      challenges); passcode stays as the recovery path. Auto-lock after 15
+      minutes idle on devices with a passkey.
+- [x] Kill switch: HUD bar + Security panel + the phrases "stand down" /
+      "وقف كل حاجة" set `kv.paused`. While paused no approval executes, cron
+      drafts and sends nothing, approval tools refuse to queue. Server code
+      only; resume is a button.
+- [ ] Owner to do on each device: open ⚙ → "Add this device".
 
 ## Sprint 2 — Voice quality
 - [ ] Review the HUD on a real phone and desktop; tune sizes and motion.
@@ -69,6 +72,11 @@ The step from "smart tool" to "knows me". Everything after builds on it.
 - [ ] Scoped commands: "brief me on <business> only", "what's open in Dubai".
 - [ ] HUD: business switcher that filters tiles and briefs.
 - [ ] Expenses sheet gets one tab per business.
+- [ ] Multiple Google accounts (work + personal Gmail): `google_accounts`
+      table with per-account tokens, tools take an optional account, briefs
+      and tiles merge both and label each item. Personal Gmail needs a second
+      OAuth client set to External + published, because the current one is
+      Internal to the Workspace.
 
 ## Sprint 6 — Meetings: attend, take notes, follow up
 See "Meetings" in `docs/SPEC.md` for the design and its limits.

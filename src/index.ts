@@ -4,6 +4,8 @@ import { safeEqual, signToken, verifyToken } from "./auth";
 import { snapshot } from "./brief";
 import { runCron } from "./cron";
 import { googleAuthUrl, googleConnected, googleExchangeCode } from "./google";
+import { loginOptions, loginVerify, registerOptions, registerVerify } from "./passkeys";
+import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "./security";
 import { resolveApproval } from "./tools";
 import type { Env } from "./types";
 import { whatsappInbound, whatsappVerify } from "./whatsapp";
@@ -11,17 +13,41 @@ import { whatsappInbound, whatsappVerify } from "./whatsapp";
 const app = new Hono<{ Bindings: Env }>();
 
 const DAY = 86_400_000;
+const SESSION_TTL = 7 * DAY;
+const STAND_DOWN = /^(santino[,،]?\s*)?(stand down|stop everything|kill switch|pause everything|وقف كل حاجة|اقف كل حاجة)[\s.!]*$/i;
+const TOO_MANY = "Too many attempts. Try again in 15 minutes.";
+const clientIp = (c: { req: { header: (n: string) => string | undefined } }) => c.req.header("cf-connecting-ip") ?? "local";
 const APPROVE = /^(approve|approved|yes|ok|okay|go ahead|send it|do it|وافق|موافق|تمام|ابعت|ابعته|ابعتها|ماشي|اه|آه|أيوه|ايوه)[\s.!؟?]*$/i;
 const REJECT = /^(reject|no|cancel|don'?t send|لا|لأ|الغي|إلغاء|الغاء|متبعتش)[\s.!؟?]*$/i;
 
 // ---------- public ----------
 
 app.post("/api/login", async (c) => {
-  const { passcode } = await c.req.json<{ passcode?: string }>();
+  const ip = clientIp(c);
+  if (!(await loginAllowed(c.env, ip))) return c.json({ error: TOO_MANY }, 429);
+  const { passcode } = await c.req.json<{ passcode?: string }>().catch(() => ({ passcode: undefined }));
   if (!passcode || !(await safeEqual(c.env.SESSION_SECRET, passcode, c.env.OWNER_PASSCODE))) {
+    await loginFailed(c.env, ip);
     return c.json({ error: "Wrong passcode" }, 401);
   }
-  return c.json({ token: await signToken(c.env, "session", 30 * DAY) });
+  await loginSucceeded(c.env, ip);
+  return c.json({ token: await signToken(c.env, "session", SESSION_TTL) });
+});
+
+// Passkey login (Face ID / fingerprint). Public, rate limited like the passcode.
+app.post("/auth/passkey/options", async (c) => c.json(await loginOptions(c.env, new URL(c.req.url).hostname)));
+
+app.post("/auth/passkey/verify", async (c) => {
+  const ip = clientIp(c);
+  if (!(await loginAllowed(c.env, ip))) return c.json({ error: TOO_MANY }, 429);
+  const url = new URL(c.req.url);
+  const body = await c.req.json().catch(() => ({}));
+  if (!(await loginVerify(c.env, url.origin, url.hostname, body))) {
+    await loginFailed(c.env, ip);
+    return c.json({ error: "Passkey not accepted" }, 401);
+  }
+  await loginSucceeded(c.env, ip);
+  return c.json({ token: await signToken(c.env, "session", SESSION_TTL) });
 });
 
 app.get("/webhooks/whatsapp", (c) => whatsappVerify(c.env, new URL(c.req.url)));
@@ -54,8 +80,30 @@ app.get("/api/status", async (c) =>
     whatsapp: Boolean(c.env.WHATSAPP_TOKEN && c.env.WHATSAPP_PHONE_ID),
     voice: Boolean(c.env.STT_URL),
     owner: c.env.OWNER_NAME ?? "",
+    paused: await isPaused(c.env),
+    passkeys: (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM passkeys").first<{ n: number }>())?.n ?? 0,
   }),
 );
+
+// Kill switch. Owner only; the model has no way to call these.
+app.post("/api/pause", async (c) => {
+  await setPaused(c.env, true);
+  return c.json({ paused: true });
+});
+app.post("/api/resume", async (c) => {
+  await setPaused(c.env, false);
+  return c.json({ paused: false });
+});
+
+app.post("/api/passkeys/register/options", async (c) => c.json(await registerOptions(c.env, new URL(c.req.url).hostname)));
+app.post("/api/passkeys/register/verify", async (c) => {
+  const r = await registerVerify(c.env, new URL(c.req.url).origin, await c.req.json().catch(() => ({})));
+  return c.json(r, r.ok ? 200 : 400);
+});
+app.delete("/api/passkeys", async (c) => {
+  await c.env.DB.prepare("DELETE FROM passkeys").run();
+  return c.json({ ok: true });
+});
 
 app.get("/api/dashboard", async (c) => {
   const s = await snapshot(c.env);
@@ -74,6 +122,14 @@ app.post("/api/chat", async (c) => {
   const { text } = await c.req.json<{ text?: string }>();
   const msg = (text ?? "").trim();
   if (!msg) return c.json({ error: "Empty message" }, 400);
+
+  // Kill switch by voice or text. Deterministic, before the model sees anything.
+  if (STAND_DOWN.test(msg)) {
+    await setPaused(c.env, true);
+    const reply = "Standing down. All sending and scheduled actions are paused. Tap Resume when you want me back.";
+    await saveTurn(c.env, msg, reply);
+    return c.json({ reply, paused: true });
+  }
 
   // Voice/text approval shortcut. Deterministic and outside the model on purpose:
   // only the owner's own words can approve, and only when it is unambiguous.

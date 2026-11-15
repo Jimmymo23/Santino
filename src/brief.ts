@@ -1,5 +1,6 @@
+import { secretGet, secretSet } from "./crypto";
 import { googleConnected, googleTools } from "./google";
-import { type Env, type Tool, kvGet, kvSet, now } from "./types";
+import { type Env, type Tool, now } from "./types";
 
 const gtool = (name: string) => googleTools.find((t) => t.name === name)!;
 
@@ -17,7 +18,7 @@ export function todayBounds(env: Env): { ymd: string; hour: number; start: Date;
 async function googleSnapshot(env: Env, fresh: boolean): Promise<{ agenda: unknown[]; unread: unknown[] } | null> {
   if (!(await googleConnected(env))) return null;
   if (!fresh) {
-    const cached = await kvGet(env, "dash_google");
+    const cached = await secretGet(env, "dash_google");
     if (cached) {
       const c = JSON.parse(cached) as { at: number; data: { agenda: unknown[]; unread: unknown[] } };
       if (Date.now() - c.at < 5 * 60_000) return c.data;
@@ -33,7 +34,7 @@ async function googleSnapshot(env: Env, fresh: boolean): Promise<{ agenda: unkno
       .catch(() => []),
   ]);
   const data = { agenda: agenda as unknown[], unread: unread as unknown[] };
-  await kvSet(env, "dash_google", JSON.stringify({ at: Date.now(), data }));
+  await secretSet(env, "dash_google", JSON.stringify({ at: Date.now(), data }));
   return data;
 }
 

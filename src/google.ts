@@ -1,3 +1,4 @@
+import { secretGet, secretSet } from "./crypto";
 import { type Env, type Tool, kvGet, kvSet } from "./types";
 
 const SCOPES = [
@@ -39,9 +40,8 @@ async function tokenRequest(env: Env, params: Record<string, string>): Promise<a
 
 export async function googleExchangeCode(env: Env, code: string): Promise<void> {
   const t = await tokenRequest(env, { code, grant_type: "authorization_code", redirect_uri: redirectUri(env) });
-  // TODO(Sprint 1): encrypt at rest.
-  if (t.refresh_token) await kvSet(env, "google_refresh_token", t.refresh_token);
-  await kvSet(env, "google_access", JSON.stringify({ token: t.access_token, exp: Date.now() + t.expires_in * 1000 }));
+  if (t.refresh_token) await secretSet(env, "google_refresh_token", t.refresh_token);
+  await secretSet(env, "google_access", JSON.stringify({ token: t.access_token, exp: Date.now() + t.expires_in * 1000 }));
 }
 
 export async function googleConnected(env: Env): Promise<boolean> {
@@ -49,15 +49,15 @@ export async function googleConnected(env: Env): Promise<boolean> {
 }
 
 async function accessToken(env: Env): Promise<string> {
-  const cached = await kvGet(env, "google_access");
+  const cached = await secretGet(env, "google_access");
   if (cached) {
     const c = JSON.parse(cached) as { token: string; exp: number };
     if (c.exp > Date.now() + 60_000) return c.token;
   }
-  const refresh = await kvGet(env, "google_refresh_token");
+  const refresh = await secretGet(env, "google_refresh_token");
   if (!refresh) throw new Error("Google is not connected. Ask the owner to tap Connect Google in the app.");
   const t = await tokenRequest(env, { refresh_token: refresh, grant_type: "refresh_token" });
-  await kvSet(env, "google_access", JSON.stringify({ token: t.access_token, exp: Date.now() + t.expires_in * 1000 }));
+  await secretSet(env, "google_access", JSON.stringify({ token: t.access_token, exp: Date.now() + t.expires_in * 1000 }));
   return t.access_token;
 }
 

@@ -47,9 +47,20 @@ Tool traffic is not persisted, which keeps history valid and cheap.
 Long-term memory is Phase 2.
 
 ## Security notes
-- Single owner. Login with `OWNER_PASSCODE` returns an HMAC-signed token.
-- Google refresh token sits in D1 `kv` in plain text: encrypt before real use
-  (Sprint 1 item).
+- Single owner. Login is a passkey (WebAuthn, ES256, user verification
+  required, single-use challenges) or `OWNER_PASSCODE` as recovery. Both
+  return an HMAC-signed session token valid 7 days. Logins are rate limited
+  per IP and overall (`src/security.ts`).
+- Passkey registration needs an authenticated session, so the browser-supplied
+  public key is stored without attestation (`src/passkeys.ts`). Passkeys are
+  bound to the host name; moving to a custom domain means adding them again.
+- Auto-lock: the client drops its session after 15 minutes idle on devices
+  that have a passkey.
+- Kill switch: `kv.paused`. Checked in `executeTool`, `resolveApproval` and
+  cron. The model cannot set or clear it.
+- Google tokens and the cached inbox/calendar snapshot are AES-GCM encrypted
+  in D1 with a key derived from `SESSION_SECRET` (`src/crypto.ts`). Rotating
+  that secret means reconnecting Google.
 - WhatsApp webhook verifies `X-Hub-Signature-256` when `WHATSAPP_APP_SECRET`
   is set. Set it.
 - Tool results from email/web/WhatsApp are wrapped as untrusted data in the

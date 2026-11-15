@@ -1,5 +1,6 @@
 import { runAgent } from "./agent";
 import { todayBounds } from "./brief";
+import { isPaused } from "./security";
 import { queueApproval } from "./tools";
 import { type Env, kvGet, kvSet, notify, now } from "./types";
 
@@ -15,6 +16,10 @@ export async function runCron(env: Env): Promise<void> {
     await env.DB.prepare("UPDATE reminders SET fired = 1 WHERE id = ?").bind(r.id).run();
     await notify(env, "reminder", r.text);
   }
+
+  // Kill switch: reminders above are private notes to the owner and still fire.
+  // Everything below drafts, queues or calls paid services, so it stops.
+  if (await isPaused(env)) return;
 
   // 2. Task follow-ups: draft a WhatsApp nudge and queue it for approval.
   const follow = await env.DB.prepare(

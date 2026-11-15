@@ -1,5 +1,6 @@
 import { briefTools } from "./brief";
 import { googleTools } from "./google";
+import { PAUSED_MESSAGE, isPaused } from "./security";
 import { type Env, type Tool, audit, now } from "./types";
 import { whatsappTools } from "./whatsapp";
 
@@ -175,6 +176,7 @@ export async function executeTool(env: Env, name: string, input: unknown): Promi
   if (!tool) return { error: `Unknown tool ${name}` };
   try {
     if (tool.risk === "approval") {
+      if (await isPaused(env)) return { error: PAUSED_MESSAGE };
       const id = await queueApproval(env, name, input);
       return {
         status: "pending_approval",
@@ -192,6 +194,7 @@ export async function executeTool(env: Env, name: string, input: unknown): Promi
 
 /** Called only from owner-authenticated code paths (approve endpoint, voice shortcut). */
 export async function resolveApproval(env: Env, id: string, approve: boolean): Promise<{ ok: boolean; message: string }> {
+  if (approve && (await isPaused(env))) return { ok: false, message: "Paused. Tap Resume first, then authorize." };
   // Claim atomically so a double tap cannot execute twice.
   const claim = await env.DB.prepare(
     "UPDATE approvals SET status = ?, resolved_at = ? WHERE id = ? AND status = 'pending'",

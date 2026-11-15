@@ -27,8 +27,10 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
    the owner dictated. UI text uses `dir="auto"`.
 6. Keep the frontend a single `public/index.html` with no build step until
    the roadmap says otherwise.
-7. Once the kill switch exists, every code path that sends, executes an
-   approval or spends money must check it first.
+7. Every code path that sends, executes an approval or spends money must
+   check the kill switch (`isPaused`) first.
+8. Credentials and mailbox content stored in D1 go through `secretSet` /
+   `secretGet`, never plain `kvSet`.
 
 ## How to work
 - Jimmy acts as product owner; work sprint by sprint from `docs/ROADMAP.md`.
@@ -44,6 +46,8 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
 - `src/tools.ts` tool registry + task/reminder/team tools
 - `src/google.ts` OAuth, Gmail, Calendar, Sheets
 - `src/whatsapp.ts` send + webhook
+- `src/security.ts` kill switch and login rate limit
+- `src/passkeys.ts` WebAuthn login; `src/crypto.ts` encrypted kv values
 - `src/brief.ts` day snapshot for HUD tiles and briefs
 - `src/cron.ts` reminders, follow-ups, morning brief
 - `public/` the app

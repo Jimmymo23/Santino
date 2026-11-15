@@ -28,7 +28,7 @@
   [hidden] { display:none !important; }
   .lbl { font:600 10.5px/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--dim); }
 
-  #app { height:100%; display:grid; grid-template-rows:auto auto 1fr auto auto; }
+  #app { height:100%; display:flex; flex-direction:column; }
   .strip { display:flex; align-items:center; gap:12px; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; border-bottom:1px solid var(--line); }
   .brand { font:700 14px/1 var(--mono); letter-spacing:.34em; color:var(--cy); text-shadow:0 0 12px rgba(79,227,255,.6); }
   .links { display:flex; gap:10px; margin-inline-start:auto; }
@@ -49,7 +49,7 @@
   .tile.warn b { color:var(--red); text-shadow:0 0 10px rgba(255,93,93,.5); }
   .tile.act b { color:var(--amber); text-shadow:0 0 10px rgba(255,181,71,.5); }
 
-  #log { overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:12px; min-height:0; }
+  #log { flex:1; overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:12px; min-height:0; }
   .msg { max-width:92%; white-space:pre-wrap; overflow-wrap:anywhere; }
   .msg .lbl { display:block; margin-bottom:5px; }
   .user { align-self:flex-end; text-align:start; border-inline-end:2px solid var(--dim); padding-inline-end:10px; color:#a9c3cf; }
@@ -78,15 +78,28 @@
   #mic:disabled { opacity:.35; }
   textarea:focus, button:focus-visible, input:focus { outline:1px solid var(--cy); outline-offset:2px; }
 
+  #pausebar { display:flex; align-items:center; gap:12px; padding:9px 16px; background:rgba(60,10,10,.85); border-bottom:1px solid var(--red); color:var(--red); font:700 11px/1.3 var(--mono); letter-spacing:.14em; }
+  #pausebar button { margin-inline-start:auto; background:none; border:1px solid var(--ok); color:var(--ok); padding:7px 12px; font:700 11px/1 var(--mono); letter-spacing:.14em; }
+  .hbtn { background:none; border:1px solid var(--line); border-radius:6px; padding:5px 7px; font-size:13px; line-height:1; }
+  dialog { background:#0a1218; color:var(--text); border:1px solid var(--line2); padding:0; width:min(420px,92vw); }
+  dialog::backdrop { background:rgba(0,0,0,.7); }
+  dialog h2 { margin:0; padding:14px 16px; border-bottom:1px solid var(--line); font:700 12px/1 var(--mono); letter-spacing:.2em; color:var(--cy); }
+  dialog section { padding:14px 16px; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
+  dialog p { margin:0; color:var(--dim); font-size:14px; }
+  dialog button { align-self:flex-start; background:none; border:1px solid var(--line2); color:var(--cy); padding:9px 12px; font:700 11px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  dialog button.danger { color:var(--red); border-color:rgba(255,93,93,.6); }
+  #login .alt { background:none; border-color:var(--line2); color:var(--text); }
   #login { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; z-index:5; }
   #login .brand { font-size:22px; }
   #login input { width:min(320px,100%); background:var(--panel); color:var(--text); border:1px solid var(--line2); padding:12px 14px; font:inherit; text-align:center; letter-spacing:.2em; }
   #login button { width:min(320px,100%); background:rgba(79,227,255,.1); color:var(--cy); border:1px solid var(--cy); padding:12px; font:700 12px/1 var(--mono); letter-spacing:.2em; }
 
   @media (min-width:900px) {
-    #app { grid-template-columns:360px 1fr; grid-template-rows:auto 1fr auto auto; }
-    .strip { grid-column:1 / -1; }
-    .deck { grid-row:2 / -1; flex-direction:column; justify-content:center; gap:34px; border-bottom:0; border-inline-end:1px solid var(--line); padding:24px; }
+    #app { display:grid; grid-template-columns:360px 1fr; grid-template-rows:auto auto 1fr auto auto; }
+    .strip { grid-area:1 / 1 / 2 / -1; }
+    #pausebar { grid-area:2 / 1 / 3 / -1; }
+    #log { grid-area:3 / 2; } .chips { grid-area:4 / 2; } footer { grid-area:5 / 2; }
+    .deck { grid-area:3 / 1 / -1 / 2; flex-direction:column; justify-content:center; gap:34px; border-bottom:0; border-inline-end:1px solid var(--line); padding:24px; }
     .corewrap { width:250px; height:250px; }
     #state { bottom:-18px; }
     .tiles { flex:none; width:100%; grid-template-columns:repeat(2,1fr); gap:10px; }
@@ -107,7 +120,13 @@
     </div>
     <div id="clock">--:--</div>
     <button id="speak" aria-pressed="true" aria-label="Spoken replies">🔊</button>
+    <button class="hbtn" id="gear" aria-label="Security settings">⚙</button>
   </header>
+
+  <div id="pausebar" hidden>
+    <span>PAUSED · NOTHING IS BEING SENT</span>
+    <button id="resume">RESUME</button>
+  </div>
 
   <section class="deck">
     <button class="corewrap" id="coreBtn" aria-label="Talk to Santino">
@@ -141,11 +160,29 @@
   </footer>
 </div>
 
+<dialog id="settings">
+  <h2>SECURITY</h2>
+  <section>
+    <p id="pkState">Face ID / fingerprint login is not set up on this device.</p>
+    <button id="pkAdd">Add this device</button>
+    <button id="pkClear" class="danger" hidden>Remove all passkeys</button>
+  </section>
+  <section>
+    <p>Stand down pauses all sending and scheduled actions until you resume.</p>
+    <button id="standDown" class="danger">Stand down</button>
+  </section>
+  <section>
+    <button id="lockNow">Lock now</button>
+    <button id="closeSettings">Close</button>
+  </section>
+</dialog>
+
 <form id="login" hidden>
   <div class="brand">SANTINO</div>
   <div class="lbl">Identity check</div>
+  <button type="button" id="pkLogin" hidden>USE FACE ID / FINGERPRINT</button>
   <input id="pass" type="password" placeholder="PASSCODE" autocomplete="current-password" required>
-  <button>AUTHORIZE</button>
+  <button class="alt">ENTER WITH PASSCODE</button>
   <div class="note" id="loginErr"></div>
 </form>
 
@@ -161,7 +198,7 @@ const shown = new Set();
 const core = $("core"), cx = core.getContext("2d");
 let mode = "idle", level = 0, analyser = null, buf = null;
 const LABEL = { idle: "STANDBY", listening: "LISTENING", thinking: "PROCESSING", speaking: "SPEAKING" };
-function setMode(m) { mode = m; $("state").textContent = LABEL[m]; if (calm) draw(0); }
+function setMode(m) { mode = m; $("state").textContent = m === "idle" && !$("pausebar").hidden ? "PAUSED" : LABEL[m]; if (calm) draw(0); }
 function draw(t) {
   const d = Math.min(devicePixelRatio || 1, 2), w = core.clientWidth * d;
   if (core.width !== w) core.width = core.height = w;
@@ -234,8 +271,10 @@ async function send(msg) {
   msg = msg.trim(); if (!msg) return;
   bubble("user", msg); setMode("thinking");
   try {
-    const { reply } = await api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: msg }) });
+    const out = await api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: msg }) });
+    const { reply, paused } = out;
     bubble("assistant", reply, { type: true, cls: reply.includes("•") ? "brief" : "" }); say(reply);
+    if (paused) paintPaused(true);
   } catch (e) { note(e.message); setMode("idle"); }
   pollInbox(); pollDash();
 }
@@ -337,14 +376,86 @@ $("lGoogle").onclick = async () => {
   try { const { url } = await api("/api/google/connect"); location.href = url; } catch (e) { note(e.message); }
 };
 
-function showLogin() { token = null; try { localStorage.removeItem("santino_token"); } catch {} $("login").hidden = false; }
+// ---------- kill switch ----------
+function paintPaused(p) {
+  $("pausebar").hidden = !p;
+  if (p) $("state").textContent = "PAUSED";
+  else if (mode === "idle") $("state").textContent = LABEL.idle;
+}
+$("resume").onclick = async () => { try { await api("/api/resume", { method: "POST" }); paintPaused(false); note("BACK ONLINE"); } catch (e) { note(e.message); } };
+$("standDown").onclick = async () => { try { await api("/api/pause", { method: "POST" }); paintPaused(true); $("settings").close(); } catch (e) { note(e.message); } };
+
+// ---------- passkeys (Face ID / fingerprint) ----------
+const hasPK = "PublicKeyCredential" in window && navigator.credentials;
+const b64e = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const b64d = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+let pkOnDevice = false;
+try { pkOnDevice = localStorage.getItem("santino_pk") === "1"; } catch {}
+
+async function passkeyLogin() {
+  $("loginErr").textContent = "";
+  try {
+    const o = await (await fetch("/auth/passkey/options", { method: "POST" })).json();
+    const a = await navigator.credentials.get({ publicKey: { challenge: b64d(o.challenge), rpId: o.rpId, userVerification: "required", timeout: 60000 } });
+    const res = await fetch("/auth/passkey/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      token: o.token, id: a.id, clientDataJSON: b64e(a.response.clientDataJSON),
+      authenticatorData: b64e(a.response.authenticatorData), signature: b64e(a.response.signature) }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "ACCESS DENIED");
+    signedIn(data.token);
+  } catch (e) { $("loginErr").textContent = e.name === "NotAllowedError" ? "CANCELLED · USE PASSCODE OR TRY AGAIN" : e.message; }
+}
+$("pkLogin").onclick = passkeyLogin;
+
+$("pkAdd").onclick = async () => {
+  try {
+    const o = await api("/api/passkeys/register/options", { method: "POST" });
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: b64d(o.challenge), rp: o.rp,
+      user: { id: b64d(o.user.id), name: o.user.name, displayName: o.user.name },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      excludeCredentials: o.exclude.map((id) => ({ type: "public-key", id: b64d(id) })),
+      authenticatorSelection: { residentKey: "required", userVerification: "required" }, timeout: 60000 } });
+    await api("/api/passkeys/register/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      token: o.token, id: cred.id, clientDataJSON: b64e(cred.response.clientDataJSON),
+      publicKey: b64e(cred.response.getPublicKey()), alg: cred.response.getPublicKeyAlgorithm(),
+      label: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "" }) });
+    pkOnDevice = true; try { localStorage.setItem("santino_pk", "1"); } catch {}
+    paintSettings((settingsCount = settingsCount + 1));
+    note("PASSKEY ADDED · AUTO-LOCK AFTER 15 MIN IDLE");
+  } catch (e) { $("pkState").textContent = e.name === "InvalidStateError" ? "This device is already registered." : e.name === "NotAllowedError" ? "Cancelled." : e.message; }
+};
+$("pkClear").onclick = async () => {
+  try { await api("/api/passkeys", { method: "DELETE" }); pkOnDevice = false; try { localStorage.removeItem("santino_pk"); } catch {} paintSettings((settingsCount = 0)); } catch (e) { note(e.message); }
+};
+let settingsCount = 0;
+function paintSettings(n) {
+  $("pkState").textContent = !hasPK ? "This browser does not support Face ID / fingerprint login."
+    : n ? `Face ID / fingerprint login is on (${n} device${n > 1 ? "s" : ""}). This device ${pkOnDevice ? "is" : "is not yet"} registered.`
+    : "Face ID / fingerprint login is not set up. Add this device to unlock without the passcode.";
+  $("pkAdd").hidden = !hasPK || pkOnDevice; $("pkClear").hidden = !n;
+}
+$("gear").onclick = () => $("settings").showModal();
+$("closeSettings").onclick = () => $("settings").close();
+$("lockNow").onclick = () => { $("settings").close(); showLogin(); };
+
+// ---------- auto-lock: 15 minutes idle, only where a passkey makes unlocking one tap ----------
+let lastActive = Date.now();
+["pointerdown", "keydown"].forEach((ev) => addEventListener(ev, () => (lastActive = Date.now()), { passive: true }));
+setInterval(() => { if (token && pkOnDevice && Date.now() - lastActive > 15 * 60000) showLogin(); }, 30000);
+
+function signedIn(t) { token = t; lastActive = Date.now(); try { localStorage.setItem("santino_token", t); } catch {} $("login").hidden = true; start(); }
+function showLogin() {
+  token = null; try { localStorage.removeItem("santino_token"); } catch {}
+  speechSynthesis && speechSynthesis.cancel(); log.textContent = "";
+  $("pkLogin").hidden = !hasPK; $("login").hidden = false;
+}
 $("login").onsubmit = async (e) => {
   e.preventDefault();
   const res = await fetch("/api/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ passcode: $("pass").value }) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { $("loginErr").textContent = data.error || "ACCESS DENIED"; return; }
-  token = data.token; try { localStorage.setItem("santino_token", token); } catch {}
-  $("login").hidden = true; start();
+  $("pass").value = ""; signedIn(data.token);
 };
 
 async function start() {
@@ -356,6 +467,7 @@ async function start() {
     $("lGoogle").querySelector(".dot").classList.toggle("on", status.google);
     $("dWa").classList.toggle("on", status.whatsapp); $("dVox").classList.toggle("on", status.voice);
     mic.disabled = !status.voice;
+    paintPaused(status.paused); paintSettings((settingsCount = status.passkeys));
     const h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false }).format(new Date()));
     note(`SYSTEMS ONLINE · GOOD ${h >= 5 && h < 12 ? "MORNING" : h >= 12 && h < 18 ? "AFTERNOON" : "EVENING"}${owner ? ", " + owner.toUpperCase() : ""}`);
     if (!status.google) note("GOOGLE NOT LINKED · TAP GGL TO CONNECT");
