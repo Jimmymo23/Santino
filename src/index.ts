@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { runAgent, saveTurn } from "./agent";
+import { cancelKey, runAgent, saveTurn } from "./agent";
 import { safeEqual, signToken, verifyToken } from "./auth";
 import { snapshot } from "./brief";
 import { runCron } from "./cron";
@@ -128,9 +128,10 @@ app.get("/api/dashboard", async (c) => {
 });
 
 app.post("/api/chat", async (c) => {
-  const { text } = await c.req.json<{ text?: string }>();
+  const { text, turn } = await c.req.json<{ text?: string; turn?: string }>();
   const msg = (text ?? "").trim();
   if (!msg) return c.json({ error: "Empty message" }, 400);
+  const turnId = typeof turn === "string" && /^[\w.-]{8,64}$/.test(turn) ? turn : undefined;
 
   // Kill switch by voice or text. Deterministic, before the model sees anything.
   if (STAND_DOWN.test(msg)) {
@@ -158,7 +159,9 @@ app.post("/api/chat", async (c) => {
   }
 
   try {
-    return c.json({ reply: await runAgent(c.env, msg) });
+    const reply = await runAgent(c.env, msg, turnId);
+    if (turnId) await c.env.DB.prepare("DELETE FROM kv WHERE key = ?").bind(cancelKey(turnId)).run();
+    return reply === null ? c.json({ cancelled: true }) : c.json({ reply });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
@@ -167,6 +170,14 @@ app.post("/api/chat", async (c) => {
 // Hint that biases Whisper toward the owner's mixed Egyptian Arabic + English,
 // keeping English words in Latin script instead of transliterating them.
 const STT_HINT = "Santino. ابعت email لأحمد عن الـ meeting بتاع بكرة الساعة 3. Remind me to follow up مع الفريق.";
+
+// The owner interrupted a request (spoke over it or said stop).
+app.post("/api/chat/cancel", async (c) => {
+  const { turn } = await c.req.json<{ turn?: string }>().catch(() => ({ turn: undefined }));
+  if (typeof turn !== "string" || !/^[\w.-]{8,64}$/.test(turn)) return c.json({ error: "Bad turn id" }, 400);
+  await kvSet(c.env, cancelKey(turn), "1");
+  return c.json({ ok: true });
+});
 
 app.post("/api/transcribe", async (c) => {
   if (!c.env.STT_URL && !c.env.AI) return c.json({ error: "Voice is not configured" }, 501);

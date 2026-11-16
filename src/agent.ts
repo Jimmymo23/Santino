@@ -1,7 +1,7 @@
 import { memoryContext } from "./memory";
 import { executeTool, tools } from "./tools";
 import { BUDGET_MESSAGE, overBudget, prices, record } from "./usage";
-import { type Env, audit, now } from "./types";
+import { type Env, audit, kvGet, now } from "./types";
 
 // The prompt is two blocks. The first never changes between turns, so the API
 // can cache it together with the tool list (faster and cheaper). The second
@@ -116,8 +116,18 @@ export async function saveTurn(env: Env, user: string, assistant: string): Promi
   ]);
 }
 
-export async function runAgent(env: Env, userText: string): Promise<string> {
+/** Set by /api/chat/cancel when the owner interrupts a request. */
+export const cancelKey = (turn: string) => `cancel:${turn}`;
+
+/**
+ * Runs one turn. `turn` is the client's id for this request; if the owner
+ * interrupts, the run stops at the next step and nothing is saved to history,
+ * so the follow-up request that replaces it is not answered twice. Returns
+ * null when cancelled.
+ */
+export async function runAgent(env: Env, userText: string, turn?: string): Promise<string | null> {
   const started = Date.now();
+  const cancelled = async () => Boolean(turn) && (await kvGet(env, cancelKey(turn!))) !== null;
   const [over, memories, history] = await Promise.all([
     overBudget(env),
     memoryContext(env, userText),
@@ -141,6 +151,7 @@ export async function runAgent(env: Env, userText: string): Promise<string> {
   for (let step = 0; step < 8; step++) {
     steps++;
     const res = await callClaude(env, system, messages);
+    if (await cancelled()) return null; // interrupted: drop this reply and run no more tools
     reply = res.content
       .filter((b) => b.type === "text")
       .map((b) => b.text)

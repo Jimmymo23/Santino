@@ -51,8 +51,15 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       device, transcribed, and acted on only when they contain "Santino" (or
       follow it, or answer a question Santino just asked). "Santino, stop"
       cuts the voice and drops the pending reply. A tap also works.
-- [ ] Server-side cancel for a run in progress (stop currently drops the
-      reply on the client; tool calls already made still complete).
+- [x] Conversation mode: awake for 20s after the wake word, a tap or a
+      reply; waits for the end of a thought (0.9s after a finished sentence,
+      2s after an unfinished one) and joins the pieces; speaking over Santino
+      pauses its voice and real words replace the reply; adding something
+      while it thinks cancels the run (client and server, `/api/chat/cancel`)
+      and resends both parts; its own echo is recognised and ignored.
+      "Stop" cuts it off, "that's all" ends the conversation.
+- [ ] Tool calls already made before a cancel still stand; make side effects
+      of a cancelled run reversible or deferred.
 - [ ] Tune wake-word accuracy on real use (accent, noise, false triggers).
 - [x] Speed pass: `CLAUDE_EFFORT=low` with `thinking: between_tools`, cached
       stable system block + tools, tools and Gmail fetches run in parallel,

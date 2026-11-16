@@ -50,7 +50,7 @@ export async function runCron(env: Env): Promise<void> {
   if (hour === Number(env.BRIEF_HOUR ?? "8") && (await kvGet(env, "last_brief")) !== ymd) {
     await kvSet(env, "last_brief", ymd); // mark first so a failure cannot loop
     try {
-      await notify(env, "brief", await runAgent(env, "Morning brief."));
+      await notify(env, "brief", (await runAgent(env, "Morning brief.")) ?? "");
     } catch (e) {
       await notify(env, "brief", `Morning brief failed: ${e instanceof Error ? e.message : String(e)}`);
     }
