@@ -55,10 +55,11 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       reply on the client; tool calls already made still complete).
 - [ ] Tune wake-word accuracy on real use (accent, noise, false triggers).
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
-- [ ] Cost meter: `usage` table (migration) logging tokens, STT seconds and
-      later meeting minutes per day; `DAILY_BUDGET_USD` cap. At the cap,
-      Santino stops calling paid services and says so. Today's spend on the HUD.
-- [x] `/?listen=1` opens Santino already listening.
+- [x] Cost meter: `usage` table (per day and kind: claude, stt, tts) with
+      estimated cost from list prices; `DAILY_BUDGET_USD` cap (default 3). At
+      the cap Santino stops calling the model, transcription and the natural
+      voice. Today's spend is in the header and in ⚙, with "Allow $1 more
+      today".
 
 ## Sprint 3 — Team loop on WhatsApp
 - [ ] Meta business app, phone number, webhook, app secret.
@@ -69,15 +70,19 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 
 ## Sprint 4 — Memory
 The step from "smart tool" to "knows me". Everything after builds on it.
-- [ ] `memories` table (migration): fact, kind (person, preference, decision,
-      business, other), source, created/updated.
-- [ ] Tools: `memory_save`, `memory_search`, `memory_forget`. Owner can say
-      "remember that..." and "forget that...".
-- [ ] Relevant memories are retrieved and added to the system prompt each turn.
-- [ ] Decision log: "what did we decide about X?" answers with date and context.
-- [ ] A "What you know about me" screen to review and delete entries.
-- [ ] Rule: nothing from email, WhatsApp, web or transcripts is saved to
-      memory without the owner saying so.
+- [x] `memories` table (migration 0003): fact, kind (person, preference,
+      decision, business, other), subject, created/updated.
+- [x] Tools: `memory_save`, `memory_update`, `memory_search`,
+      `memory_forget`. Owner says "remember that..." / "forget that...".
+- [x] Memories are added to the system prompt each turn (matches to the
+      message first, then most recent, capped).
+- [x] Decision log: decisions are a memory kind with their date.
+- [x] ⚙ → "Review memory": see everything stored and delete entries.
+- [x] Rule: saved only when the owner asks; nothing from email, WhatsApp,
+      web or transcripts on the model's initiative; credentials and card/ID
+      numbers are refused in code.
+- [ ] Later: Santino suggests things worth remembering, owner approves.
+- [ ] Later: semantic search (embeddings) once there are hundreds of entries.
 
 ## Sprint 5 — Business workspaces
 - [ ] `businesses` table; `business_id` on tasks, people, expenses, memories,

@@ -3,6 +3,8 @@ export interface Env {
   /** Workers AI, used for speech-to-text when no external STT_URL is set. */
   AI?: Ai;
   ANTHROPIC_API_KEY: string;
+  /** Override for a gateway or a local test double. Default https://api.anthropic.com */
+  ANTHROPIC_BASE_URL?: string;
   OWNER_PASSCODE: string;
   SESSION_SECRET: string;
   CLAUDE_MODEL?: string;
@@ -26,6 +28,11 @@ export interface Env {
   /** Workers AI text-to-speech model and optional speaker name. */
   TTS_MODEL?: string;
   TTS_VOICE?: string;
+  /** Daily cap for paid services, USD. Default 3. */
+  DAILY_BUDGET_USD?: string;
+  /** Claude list prices, USD per million tokens. Defaults 2 / 10. */
+  PRICE_IN_PER_MTOK?: string;
+  PRICE_OUT_PER_MTOK?: string;
 }
 
 export interface Tool {

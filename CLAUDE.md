@@ -31,6 +31,9 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
    check the kill switch (`isPaused`) first.
 8. Credentials and mailbox content stored in D1 go through `secretSet` /
    `secretGet`, never plain `kvSet`.
+9. Every call to a paid service records its cost (`record`) and checks
+   `overBudget` first.
+10. Memory is written only on the owner's explicit request.
 
 ## How to work
 - Jimmy acts as product owner; work sprint by sprint from `docs/ROADMAP.md`.
@@ -48,6 +51,8 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
 - `src/whatsapp.ts` send + webhook
 - `src/security.ts` kill switch and login rate limit
 - `src/passkeys.ts` WebAuthn login; `src/crypto.ts` encrypted kv values
+- `src/memory.ts` long-term memory tools and prompt context
+- `src/usage.ts` cost meter and daily budget
 - `src/brief.ts` day snapshot for HUD tiles and briefs
 - `src/cron.ts` reminders, follow-ups, morning brief
 - `public/` the app

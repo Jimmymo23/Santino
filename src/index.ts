@@ -6,7 +6,9 @@ import { runCron } from "./cron";
 import { googleAuthUrl, googleConnected, googleExchangeCode } from "./google";
 import { loginOptions, loginVerify, registerOptions, registerVerify } from "./passkeys";
 import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "./security";
+import { listMemories } from "./memory";
 import { resolveApproval } from "./tools";
+import { extendBudget, overBudget, prices, record, spendToday } from "./usage";
 import { type Env, kvGet, kvSet } from "./types";
 import { whatsappInbound, whatsappVerify } from "./whatsapp";
 
@@ -120,6 +122,7 @@ app.get("/api/dashboard", async (c) => {
     unread: s.google_connected ? s.unread_email.length : null,
     approvals: s.approvals_pending,
     next_reminder: s.reminders[0] ?? null,
+    spend: await spendToday(c.env),
   });
 });
 
@@ -169,6 +172,10 @@ app.post("/api/transcribe", async (c) => {
   const audio = await c.req.blob();
   if (audio.size > 20 * 1024 * 1024) return c.json({ error: "Recording too long" }, 413);
   if (audio.size < 1500) return c.json({ text: "" });
+  if (await overBudget(c.env)) return c.json({ error: "Daily budget reached" }, 402);
+  // 16 kHz mono WAV from hands-free is exact; other formats are a rough estimate (~32 kbps).
+  const seconds = audio.type.includes("wav") ? (audio.size - 44) / 32000 : audio.size / 4000;
+  await record(c.env, "stt", seconds, seconds * prices(c.env).sttPerSecond);
 
   if (!c.env.STT_URL && c.env.AI) {
     // Default: Whisper on Workers AI. No extra account or key needed.
@@ -213,6 +220,8 @@ app.post("/api/speak", async (c) => {
     .catch(() => ({ text: undefined, speaker: undefined }));
   const clean = (text ?? "").replace(/[•*_#`]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1500);
   if (!clean) return c.json({ error: "Nothing to say" }, 400);
+  if (await overBudget(c.env)) return c.json({ error: "Daily budget reached" }, 402);
+  await record(c.env, "tts", clean.length, clean.length * prices(c.env).ttsPerChar);
   try {
     // `speaker` in the request is only for previewing a voice before saving it.
     const voice = speaker && VOICES.includes(speaker) ? speaker : await currentVoice(c.env);
@@ -227,6 +236,18 @@ app.post("/api/speak", async (c) => {
   } catch (e) {
     return c.json({ error: `Voice failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
+});
+
+app.get("/api/memories", async (c) => c.json({ memories: await listMemories(c.env) }));
+app.delete("/api/memories/:id", async (c) => {
+  await c.env.DB.prepare("DELETE FROM memories WHERE id = ?").bind(c.req.param("id")).run();
+  return c.json({ ok: true });
+});
+
+// Owner raises today's spending cap by one dollar per tap.
+app.post("/api/budget/extend", async (c) => {
+  await extendBudget(c.env, 1);
+  return c.json(await spendToday(c.env));
 });
 
 app.post("/api/voice", async (c) => {

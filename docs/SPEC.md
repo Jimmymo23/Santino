@@ -53,7 +53,8 @@ and executes them after a spoken or tapped approval.
 
 ### Phase 2 — Knows me
 - Long-term memory of people, preferences and decisions, with a decision log
-  and a screen to review and delete what is stored.
+  and a screen to review and delete what is stored. (Built: saved only when
+  the owner asks.)
 - Business workspaces: everything tagged to one of Jimmy's companies, with
   scoped briefs and a HUD switcher.
 - One-tap access from the phone lock screen or action button.

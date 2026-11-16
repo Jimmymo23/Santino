@@ -45,6 +45,7 @@ export async function runCron(env: Env): Promise<void> {
 
   // 3. Morning brief, once a day at BRIEF_HOUR local time.
   const { ymd, hour } = todayBounds(env);
+  // (runAgent itself refuses to call the model once the daily budget is spent.)
   if (hour === Number(env.BRIEF_HOUR ?? "8") && (await kvGet(env, "last_brief")) !== ymd) {
     await kvSet(env, "last_brief", ymd); // mark first so a failure cannot loop
     try {
