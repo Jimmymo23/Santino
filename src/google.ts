@@ -113,21 +113,22 @@ export const googleTools: Tool[] = [
     run: async (env, { query, max }) => {
       const n = Math.min(Math.max(Number(max) || 8, 1), 15);
       const list = await g(env, `${GMAIL}/messages?q=${encodeURIComponent(query)}&maxResults=${n}`);
-      const out = [];
-      for (const m of list.messages ?? []) {
-        const msg = await g(
-          env,
-          `${GMAIL}/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-        );
-        out.push({
-          id: m.id,
-          from: header(msg, "from"),
-          subject: header(msg, "subject"),
-          date: header(msg, "date"),
-          snippet: msg.snippet,
-        });
-      }
-      return out;
+      // Fetch the messages side by side instead of one after another.
+      return Promise.all(
+        ((list.messages ?? []) as { id: string }[]).map(async (m) => {
+          const msg = await g(
+            env,
+            `${GMAIL}/messages/${m.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+          );
+          return {
+            id: m.id,
+            from: header(msg, "from"),
+            subject: header(msg, "subject"),
+            date: header(msg, "date"),
+            snippet: msg.snippet,
+          };
+        }),
+      );
     },
   },
   {

@@ -29,4 +29,5 @@ DAILY_BUDGET_USD = "2"   # default; the owner can change it in the app (⚙)
 TTS_MODEL = "@cf/deepgram/aura-2-en"
 TTS_VOICE = "draco"   # default speaker; the owner can change it in the app (⚙ → Voice)
 CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_EFFORT = "low"   # low = fastest replies; medium or high = more careful, slower
 WHATSAPP_API_VERSION = "v21.0"

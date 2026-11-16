@@ -315,23 +315,45 @@ function bubble(role, content, { type = false, label, cls = "" } = {}) {
 const player = new Audio(); let ttsOn = false, sayId = 0, unlocked = false;
 const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
 addEventListener("pointerdown", () => { if (unlocked) return; unlocked = true; player.src = SILENT; player.play().catch(() => {}); }, { passive: true });
-function hush() { sayId++; player.pause(); if ("speechSynthesis" in window) speechSynthesis.cancel(); }
+let cancelPlay = null;
+function hush() { sayId++; player.pause(); if (cancelPlay) { cancelPlay(); cancelPlay = null; } if ("speechSynthesis" in window) speechSynthesis.cancel(); }
+// Split a reply so the first sentence can start playing while the rest is still being voiced.
+function speechChunks(t) {
+  const parts = t.replace(/•/g, " ").match(/[^.!?؟\n]+[.!?؟]*\s*/g) || [t], out = []; let cur = "";
+  for (const p of parts) {
+    if (!out.length && !cur && p.trim().length > 12) { out.push(p.trim()); continue; }
+    if ((cur + p).length > 220 && cur.trim()) { out.push(cur.trim()); cur = p; } else cur += p;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out.filter((x) => /[\p{L}\p{N}]/u.test(x));
+}
+function playBlob(blob) {
+  return new Promise((done, fail) => {
+    const url = URL.createObjectURL(blob), end = (f) => () => { URL.revokeObjectURL(url); cancelPlay = null; f(); };
+    cancelPlay = end(done);
+    player.src = url; player.onplaying = () => setMode("speaking");
+    player.onended = end(done); player.onerror = end(() => fail(new Error("audio")));
+    player.play().catch(end(() => fail(new Error("audio"))));
+  });
+}
 async function say(t, speaker) {
   hush();
   if (!speakOn && !speaker) { setMode("idle"); return; }
   const id = sayId;
   if (ttsOn && token && !/[\u0600-\u06FF]/.test(t)) {
+    const voice = (text) => fetch("/api/speak", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ text, speaker }) })
+      .then((r) => { if (!r.ok) throw new Error("tts " + r.status); return r.blob(); });
+    const pending = speechChunks(t).map(voice); // all requested at once; the short first one returns first
+    pending.forEach((p) => p.catch(() => {}));
+    let played = 0;
     try {
-      const res = await fetch("/api/speak", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ text: t, speaker }) });
-      if (!res.ok) throw new Error("tts " + res.status);
-      const url = URL.createObjectURL(await res.blob());
-      if (id !== sayId) { URL.revokeObjectURL(url); return; } // something newer took over
-      player.src = url;
-      player.onplaying = () => setMode("speaking");
-      player.onended = player.onerror = () => { URL.revokeObjectURL(url); if (id === sayId) setMode("idle"); };
-      await player.play();
-      return;
-    } catch { if (id !== sayId) return; }
+      for (const p of pending) {
+        const blob = await p; if (id !== sayId) return;
+        await playBlob(blob); if (id !== sayId) return;
+        played++;
+      }
+      setMode("idle"); return;
+    } catch { if (id !== sayId) return; if (played) { setMode("idle"); return; } }
   }
   browserSay(t);
 }
@@ -496,9 +518,9 @@ async function heard(blob) {
     if (!cmd && t.slice(0, m.index).trim().split(/\s+/).length >= 3) cmd = t.slice(0, m.index).trim(); // "…, Santino" at the end
     if (STOP.test(cmd)) return stopAll();
     if (!cmd) { if (busy) return; chime(); return arm(8000); } // just the name: wait for the command
-    armedUntil = 0; return send(cmd);
+    armedUntil = 0; chime(); return send(cmd); // chime = "heard you", before the thinking starts
   }
-  if (armed && !busy) { armedUntil = 0; return send(t); }
+  if (armed && !busy) { armedUntil = 0; chime(); return send(t); }
   // No wake word: ignored on purpose.
 }
 function onAudio(e) {
@@ -515,7 +537,7 @@ function onAudio(e) {
   }
   hf.seg.push(frame); hf.total += ms;
   if (rms > thr * .7) { hf.voiced += ms; hf.quiet = 0; } else hf.quiet += ms;
-  if (hf.quiet >= 900 || hf.total >= 20000) {
+  if (hf.quiet >= 650 || hf.total >= 20000) {
     const frames = hf.seg, voiced = hf.voiced; hf.seg = null;
     if (voiced >= 300) { const blob = toWav(frames, hf.ctx.sampleRate); hf.queue = hf.queue.then(() => heard(blob)); }
   }

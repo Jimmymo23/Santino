@@ -54,6 +54,13 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 - [ ] Server-side cancel for a run in progress (stop currently drops the
       reply on the client; tool calls already made still complete).
 - [ ] Tune wake-word accuracy on real use (accent, noise, false triggers).
+- [x] Speed pass: `CLAUDE_EFFORT=low` with `thinking: between_tools`, cached
+      stable system block + tools, tools and Gmail fetches run in parallel,
+      voice starts on the first sentence, end-of-speech pause 650ms, chime on
+      accepted command. Each turn logs `turn_timing` (ms, steps, tools) in
+      `audit` for tuning.
+- [ ] Streaming replies (speak while the model is still writing) and an
+      on-device wake word, if latency is still not good enough.
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
 - [x] Cost meter: `usage` table (per day and kind: claude, stt, tts) with
       estimated cost from list prices; `DAILY_BUDGET_USD` cap (default 2, editable in ⚙). At

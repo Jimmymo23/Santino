@@ -8,6 +8,8 @@ export interface Env {
   OWNER_PASSCODE: string;
   SESSION_SECRET: string;
   CLAUDE_MODEL?: string;
+  /** low | medium | high. Default low, for speed. */
+  CLAUDE_EFFORT?: string;
   OWNER_NAME?: string;
   TIMEZONE?: string;
   /** Language Santino replies in. Default English. */
