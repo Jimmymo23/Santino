@@ -78,7 +78,7 @@ app.get("/api/status", async (c) =>
   c.json({
     google: await googleConnected(c.env),
     whatsapp: Boolean(c.env.WHATSAPP_TOKEN && c.env.WHATSAPP_PHONE_ID),
-    voice: Boolean(c.env.STT_URL),
+    voice: Boolean(c.env.STT_URL || c.env.AI),
     owner: c.env.OWNER_NAME ?? "",
     paused: await isPaused(c.env),
     passkeys: (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM passkeys").first<{ n: number }>())?.n ?? 0,
@@ -155,15 +155,41 @@ app.post("/api/chat", async (c) => {
   }
 });
 
+// Hint that biases Whisper toward the owner's mixed Egyptian Arabic + English,
+// keeping English words in Latin script instead of transliterating them.
+const STT_HINT = "Santino. ابعت email لأحمد عن الـ meeting بتاع بكرة الساعة 3. Remind me to follow up مع الفريق.";
+
 app.post("/api/transcribe", async (c) => {
-  if (!c.env.STT_URL) return c.json({ error: "Voice is not configured" }, 501);
+  if (!c.env.STT_URL && !c.env.AI) return c.json({ error: "Voice is not configured" }, 501);
   const audio = await c.req.blob();
   if (audio.size > 20 * 1024 * 1024) return c.json({ error: "Recording too long" }, 413);
+  if (audio.size < 1500) return c.json({ text: "" });
+
+  if (!c.env.STT_URL && c.env.AI) {
+    // Default: Whisper on Workers AI. No extra account or key needed.
+    const bytes = new Uint8Array(await audio.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    try {
+      const out = (await c.env.AI.run("@cf/openai/whisper-large-v3-turbo", {
+        audio: btoa(bin),
+        task: "transcribe",
+        vad_filter: true,
+        initial_prompt: STT_HINT,
+      })) as { text?: string };
+      const text = (out.text ?? "").trim();
+      // Whisper sometimes echoes the hint back on silent audio.
+      return c.json({ text: text === STT_HINT ? "" : text });
+    } catch (e) {
+      return c.json({ error: `Transcription failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
+    }
+  }
+
   const form = new FormData();
   const ext = audio.type.includes("mp4") ? "mp4" : "webm";
   form.append("file", audio, `audio.${ext}`);
   if (c.env.STT_MODEL) form.append("model", c.env.STT_MODEL);
-  const res = await fetch(c.env.STT_URL, {
+  const res = await fetch(c.env.STT_URL!, {
     method: "POST",
     headers: c.env.STT_KEY ? { authorization: `Bearer ${c.env.STT_KEY}` } : {},
     body: form,

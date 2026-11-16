@@ -196,7 +196,7 @@ const shown = new Set();
 
 // ---------- core: reacts to idle / listening / thinking / speaking ----------
 const core = $("core"), cx = core.getContext("2d");
-let mode = "idle", level = 0, analyser = null, buf = null;
+let mode = "idle", level = 0, analyser = null, buf = null, heardAt = 0, spoke = false, recStart = 0;
 const LABEL = { idle: "STANDBY", listening: "LISTENING", thinking: "PROCESSING", speaking: "SPEAKING" };
 function setMode(m) { mode = m; $("state").textContent = m === "idle" && !$("pausebar").hidden ? "PAUSED" : LABEL[m]; if (calm) draw(0); }
 function draw(t) {
@@ -206,7 +206,12 @@ function draw(t) {
   if (mode === "listening" && analyser) {
     analyser.getByteTimeDomainData(buf);
     let sum = 0; for (const v of buf) sum += (v - 128) ** 2;
-    level += (Math.min(1, Math.sqrt(sum / buf.length) / 40) - level) * .35;
+    const raw = Math.min(1, Math.sqrt(sum / buf.length) / 40);
+    level += (raw - level) * .35;
+    // Auto-stop: once speech was heard, 1.6s of quiet ends the recording. Hard cap 90s.
+    const nowMs = performance.now();
+    if (raw > .12) { spoke = true; heardAt = nowMs; }
+    if (rec && rec.state === "recording" && ((spoke && nowMs - heardAt > 1600) || nowMs - recStart > 90000 || (!spoke && nowMs - recStart > 8000))) rec.stop();
   } else if (mode === "speaking") level += ((.35 + .3 * Math.sin(s * 9) * Math.sin(s * 2.3)) - level) * .2;
   else if (mode === "thinking") level += (.25 - level) * .1;
   else level += ((.06 + .04 * Math.sin(s * 1.4)) - level) * .08;
@@ -356,6 +361,7 @@ async function toggleMic() {
         if (heard) send(heard); else { note("DIDN'T CATCH THAT"); setMode("idle"); }
       } catch (e) { note(e.message); setMode("idle"); }
     };
+    spoke = false; heardAt = recStart = performance.now();
     rec.start(); mic.classList.add("rec"); setMode("listening");
   } catch { note("MICROPHONE PERMISSION NEEDED"); }
 }
@@ -472,6 +478,8 @@ async function start() {
     note(`SYSTEMS ONLINE · GOOD ${h >= 5 && h < 12 ? "MORNING" : h >= 12 && h < 18 ? "AFTERNOON" : "EVENING"}${owner ? ", " + owner.toUpperCase() : ""}`);
     if (!status.google) note("GOOGLE NOT LINKED · TAP GGL TO CONNECT");
     pollInbox(); pollDash();
+    // One-tap access: a home-screen or lock-screen shortcut to /?listen=1 opens listening.
+    if (new URLSearchParams(location.search).has("listen") && status.voice) { history.replaceState(null, "", "/"); toggleMic(); }
   } catch {}
 }
 

@@ -40,6 +40,12 @@ Meta for Developers -> WhatsApp -> Cloud API. Webhook URL:
 subscribe to `messages`.
 
 ## Voice
-Set `STT_URL` to any OpenAI-compatible transcription endpoint
-(`POST multipart: file, model`). Without it the mic button is disabled and
-text still works.
+Speech-to-text works out of the box through Workers AI (Whisper large v3
+turbo, the `[ai]` binding in `wrangler.toml`). To use another provider, set
+`STT_URL` to any OpenAI-compatible transcription endpoint
+(`POST multipart: file, model`) plus `STT_KEY` / `STT_MODEL`.
+
+Local `wrangler dev` needs `wrangler login`, because the AI binding always
+runs remotely and counts against the account's Workers AI usage.
+
+Open `/?listen=1` to start listening immediately (use it for a phone shortcut).

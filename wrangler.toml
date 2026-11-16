@@ -13,6 +13,9 @@ database_name = "santino"
 database_id = "4cd06d64-1430-42ce-b9c7-5a4eb13b3e27"
 migrations_dir = "migrations"
 
+[ai]
+binding = "AI"
+
 [triggers]
 crons = ["*/5 * * * *"]
 

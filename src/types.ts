@@ -1,5 +1,7 @@
 export interface Env {
   DB: D1Database;
+  /** Workers AI, used for speech-to-text when no external STT_URL is set. */
+  AI?: Ai;
   ANTHROPIC_API_KEY: string;
   OWNER_PASSCODE: string;
   SESSION_SECRET: string;

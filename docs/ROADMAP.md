@@ -35,15 +35,19 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 
 ## Sprint 2 — Voice quality
 - [ ] Review the HUD on a real phone and desktop; tune sizes and motion.
-- [ ] Compare 2-3 STT providers on real Egyptian Arabic + English recordings.
+- [x] Speech-to-text on by default: Whisper large v3 turbo on Workers AI
+      (`[ai]` binding, no extra key). `STT_URL` still overrides it.
+- [ ] Judge accuracy on real Egyptian Arabic + English use for a week; if it
+      falls short, compare 2-3 other providers through `STT_URL`.
 - [ ] Neural TTS with a consistent voice, Arabic and English.
-- [ ] Hands-free mode: auto-stop on silence, auto-listen after reply.
+- [x] Auto-stop on silence (1.6s after speech; 90s cap).
+- [ ] Hands-free mode: auto-listen again after the reply is spoken.
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
 - [ ] Cost meter: `usage` table (migration) logging tokens, STT seconds and
       later meeting minutes per day; `DAILY_BUDGET_USD` cap. At the cap,
       Santino stops calling paid services and says so. Today's spend on the HUD.
-- [ ] One-tap access: phone shortcut (lock screen / action button / home
-      screen) that opens Santino already listening (`/?listen=1`).
+- [x] `/?listen=1` opens Santino already listening.
+- [ ] Owner: add a phone shortcut (home screen / action button) to that URL.
 
 ## Sprint 3 — Team loop on WhatsApp
 - [ ] Meta business app, phone number, webhook, app secret.
