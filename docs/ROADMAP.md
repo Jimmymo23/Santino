@@ -52,7 +52,8 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       later meeting minutes per day; `DAILY_BUDGET_USD` cap. At the cap,
       Santino stops calling paid services and says so. Today's spend on the HUD.
 - [x] `/?listen=1` opens Santino already listening.
-- [ ] Owner: add a phone shortcut (home screen / action button) to that URL.
+- [x] "Start listening as soon as I open Santino" switch in ⚙ (per device),
+      which replaces the need for a separate shortcut.
 
 ## Sprint 3 — Team loop on WhatsApp
 - [ ] Meta business app, phone number, webhook, app secret.

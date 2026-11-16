@@ -169,6 +169,9 @@
     <button id="pkClear" class="danger" hidden>Remove all passkeys</button>
   </section>
   <section>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="autoListen"> Start listening as soon as I open Santino</label>
+  </section>
+  <section>
     <p>Voice Santino speaks with.</p>
     <select id="voiceSel" aria-label="Voice"></select>
     <button id="voiceTry">Preview</button>
@@ -202,7 +205,7 @@ const shown = new Set();
 
 // ---------- core: reacts to idle / listening / thinking / speaking ----------
 const core = $("core"), cx = core.getContext("2d");
-let mode = "idle", level = 0, analyser = null, buf = null, heardAt = 0, spoke = false, recStart = 0;
+let mode = "idle", level = 0, analyser = null, buf = null, heardAt = 0, spoke = false, recStart = 0, autoStop = true;
 const LABEL = { idle: "STANDBY", listening: "LISTENING", thinking: "PROCESSING", speaking: "SPEAKING" };
 function setMode(m) { mode = m; $("state").textContent = m === "idle" && !$("pausebar").hidden ? "PAUSED" : LABEL[m]; if (calm) draw(0); }
 function draw(t) {
@@ -217,7 +220,7 @@ function draw(t) {
     // Auto-stop: once speech was heard, 1.6s of quiet ends the recording. Hard cap 90s.
     const nowMs = performance.now();
     if (raw > .12) { spoke = true; heardAt = nowMs; }
-    if (rec && rec.state === "recording" && ((spoke && nowMs - heardAt > 1600) || nowMs - recStart > 90000 || (!spoke && nowMs - recStart > 8000))) rec.stop();
+    if (rec && rec.state === "recording" && autoStop && ((spoke && nowMs - heardAt > 1600) || nowMs - recStart > 90000 || (!spoke && nowMs - recStart > 8000))) rec.stop();
   } else if (mode === "speaking") level += ((.35 + .3 * Math.sin(s * 9) * Math.sin(s * 2.3)) - level) * .2;
   else if (mode === "thinking") level += (.25 - level) * .1;
   else level += ((.06 + .04 * Math.sin(s * 1.4)) - level) * .08;
@@ -381,6 +384,10 @@ async function toggleMic() {
     actx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = actx.createAnalyser(); analyser.fftSize = 512; buf = new Uint8Array(analyser.fftSize);
     actx.createMediaStreamSource(stream).connect(analyser);
+    // Without a recent tap the browser may keep audio analysis suspended; then we
+    // cannot hear silence, so the owner taps to stop instead of auto-stop.
+    await actx.resume().catch(() => {});
+    autoStop = actx.state === "running";
     rec = new MediaRecorder(stream); chunks = [];
     rec.ondataavailable = (e) => chunks.push(e.data);
     rec.onstop = async () => {
@@ -482,6 +489,10 @@ function paintVoices(current) {
 }
 $("voiceSel").onchange = async () => { try { await api("/api/voice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ speaker: $("voiceSel").value }) }); $("voiceTry").click(); } catch (e) { note(e.message); } };
 $("voiceTry").onclick = () => say("Good to see you, sir. All systems are online, and for once nothing is on fire.", $("voiceSel").value);
+let autoListen = false;
+try { autoListen = localStorage.getItem("santino_autolisten") === "1"; } catch {}
+$("autoListen").checked = autoListen;
+$("autoListen").onchange = () => { autoListen = $("autoListen").checked; try { localStorage.setItem("santino_autolisten", autoListen ? "1" : "0"); } catch {} };
 $("gear").onclick = () => $("settings").showModal();
 $("closeSettings").onclick = () => $("settings").close();
 $("lockNow").onclick = () => { $("settings").close(); showLogin(); };
@@ -520,7 +531,8 @@ async function start() {
     if (!status.google) note("GOOGLE NOT LINKED · TAP GGL TO CONNECT");
     pollInbox(); pollDash();
     // One-tap access: a home-screen or lock-screen shortcut to /?listen=1 opens listening.
-    if (new URLSearchParams(location.search).has("listen") && status.voice) { history.replaceState(null, "", "/"); toggleMic(); }
+    const wantsListen = new URLSearchParams(location.search).has("listen") || autoListen;
+    if (wantsListen && status.voice && !rec) { history.replaceState(null, "", "/"); toggleMic(); }
   } catch {}
 }
 
