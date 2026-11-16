@@ -23,7 +23,9 @@ export async function record(env: Env, kind: "claude" | "stt" | "tts", units: nu
     .run();
 }
 
-export async function spendToday(env: Env): Promise<{ spent: number; budget: number; byKind: Record<string, number> }> {
+export async function spendToday(
+  env: Env,
+): Promise<{ spent: number; budget: number; base: number; byKind: Record<string, number> }> {
   const { ymd } = todayBounds(env);
   const rows = await env.DB.prepare("SELECT kind, cost FROM usage WHERE day = ?").bind(ymd).all<{ kind: string; cost: number }>();
   const byKind: Record<string, number> = {};
@@ -33,12 +35,18 @@ export async function spendToday(env: Env): Promise<{ spent: number; budget: num
     spent += r.cost;
   }
   const extra = Number((await kvGet(env, `budget_extra:${ymd}`)) ?? 0);
-  return { spent, budget: num(env.DAILY_BUDGET_USD, 3) + extra, byKind };
+  const base = num((await kvGet(env, "daily_budget")) ?? env.DAILY_BUDGET_USD, 2);
+  return { spent, budget: base + extra, base, byKind };
 }
 
 export async function overBudget(env: Env): Promise<boolean> {
   const s = await spendToday(env);
   return s.spent >= s.budget;
+}
+
+/** Owner-only: set the standing daily cap (USD). */
+export async function setBudget(env: Env, usd: number): Promise<void> {
+  await kvSet(env, "daily_budget", String(usd));
 }
 
 /** Owner-only: raise today's cap. Resets at midnight (owner's timezone). */

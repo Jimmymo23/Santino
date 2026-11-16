@@ -56,7 +56,7 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 - [ ] Tune wake-word accuracy on real use (accent, noise, false triggers).
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
 - [x] Cost meter: `usage` table (per day and kind: claude, stt, tts) with
-      estimated cost from list prices; `DAILY_BUDGET_USD` cap (default 3). At
+      estimated cost from list prices; `DAILY_BUDGET_USD` cap (default 2, editable in ⚙). At
       the cap Santino stops calling the model, transcription and the natural
       voice. Today's spend is in the header and in ⚙, with "Allow $1 more
       today".

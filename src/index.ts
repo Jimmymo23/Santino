@@ -8,7 +8,7 @@ import { loginOptions, loginVerify, registerOptions, registerVerify } from "./pa
 import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "./security";
 import { listMemories } from "./memory";
 import { resolveApproval } from "./tools";
-import { extendBudget, overBudget, prices, record, spendToday } from "./usage";
+import { extendBudget, overBudget, prices, record, setBudget, spendToday } from "./usage";
 import { type Env, kvGet, kvSet } from "./types";
 import { whatsappInbound, whatsappVerify } from "./whatsapp";
 
@@ -242,6 +242,13 @@ app.get("/api/memories", async (c) => c.json({ memories: await listMemories(c.en
 app.delete("/api/memories/:id", async (c) => {
   await c.env.DB.prepare("DELETE FROM memories WHERE id = ?").bind(c.req.param("id")).run();
   return c.json({ ok: true });
+});
+
+app.post("/api/budget", async (c) => {
+  const { usd } = await c.req.json<{ usd?: number }>().catch(() => ({ usd: undefined }));
+  if (typeof usd !== "number" || !(usd >= 0.25 && usd <= 50)) return c.json({ error: "Choose a cap between $0.25 and $50" }, 400);
+  await setBudget(c.env, Math.round(usd * 100) / 100);
+  return c.json(await spendToday(c.env));
 });
 
 // Owner raises today's spending cap by one dollar per tap.

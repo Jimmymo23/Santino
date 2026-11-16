@@ -177,6 +177,7 @@
   </section>
   <section>
     <p id="budgetState">Spending today: –</p>
+    <label style="display:flex;gap:8px;align-items:center">Daily cap $ <input id="budgetCap" type="number" min="0.25" max="50" step="0.25" style="width:84px;background:var(--panel);color:var(--text);border:1px solid var(--line2);padding:8px;font:inherit"> <button id="budgetSave" style="align-self:auto">Save</button></label>
     <button id="budgetMore">Allow $1 more today</button>
   </section>
   <section>
@@ -421,8 +422,10 @@ function paintSpend(sp) {
   e.textContent = money(sp.spent); e.title = `Spent today ${money(sp.spent)} of ${money(sp.budget)}`;
   e.classList.toggle("warn", sp.spent >= sp.budget * .8 && sp.spent < sp.budget); e.classList.toggle("over", sp.spent >= sp.budget);
   const k = sp.byKind || {};
+  if (document.activeElement !== $("budgetCap")) $("budgetCap").value = sp.base;
   $("budgetState").textContent = `Spending today: ${money(sp.spent)} of ${money(sp.budget)} (thinking ${money(k.claude || 0)}, listening ${money(k.stt || 0)}, voice ${money(k.tts || 0)}). Estimates.`;
 }
+$("budgetSave").onclick = async () => { try { paintSpend(await api("/api/budget", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ usd: Number($("budgetCap").value) }) })); } catch (e) { $("budgetState").textContent = e.message; } };
 $("budgetMore").onclick = async () => { try { paintSpend(await api("/api/budget/extend", { method: "POST" })); } catch (e) { note(e.message); } };
 
 async function openMemory() {

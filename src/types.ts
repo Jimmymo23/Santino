@@ -28,7 +28,7 @@ export interface Env {
   /** Workers AI text-to-speech model and optional speaker name. */
   TTS_MODEL?: string;
   TTS_VOICE?: string;
-  /** Daily cap for paid services, USD. Default 3. */
+  /** Daily cap for paid services, USD. Default 2. The owner can override it in the app. */
   DAILY_BUDGET_USD?: string;
   /** Claude list prices, USD per million tokens. Defaults 2 / 10. */
   PRICE_IN_PER_MTOK?: string;
