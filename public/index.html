@@ -87,6 +87,7 @@
   dialog section { padding:14px 16px; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:8px; }
   dialog p { margin:0; color:var(--dim); font-size:14px; }
   dialog button { align-self:flex-start; background:none; border:1px solid var(--line2); color:var(--cy); padding:9px 12px; font:700 11px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+  dialog select { background:var(--panel); color:var(--text); border:1px solid var(--line2); padding:9px 10px; font:inherit; border-radius:0; }
   dialog button.danger { color:var(--red); border-color:rgba(255,93,93,.6); }
   #login .alt { background:none; border-color:var(--line2); color:var(--text); }
   #login { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; z-index:5; }
@@ -120,7 +121,7 @@
     </div>
     <div id="clock">--:--</div>
     <button id="speak" aria-pressed="true" aria-label="Spoken replies">🔊</button>
-    <button class="hbtn" id="gear" aria-label="Security settings">⚙</button>
+    <button class="hbtn" id="gear" aria-label="Settings">⚙</button>
   </header>
 
   <div id="pausebar" hidden>
@@ -161,11 +162,16 @@
 </div>
 
 <dialog id="settings">
-  <h2>SECURITY</h2>
+  <h2>SETTINGS</h2>
   <section>
     <p id="pkState">Face ID / fingerprint login is not set up on this device.</p>
     <button id="pkAdd">Add this device</button>
     <button id="pkClear" class="danger" hidden>Remove all passkeys</button>
+  </section>
+  <section>
+    <p>Voice Santino speaks with.</p>
+    <select id="voiceSel" aria-label="Voice"></select>
+    <button id="voiceTry">Preview</button>
   </section>
   <section>
     <p>Stand down pauses all sending and scheduled actions until you resume.</p>
@@ -268,13 +274,13 @@ const player = new Audio(); let ttsOn = false, sayId = 0, unlocked = false;
 const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
 addEventListener("pointerdown", () => { if (unlocked) return; unlocked = true; player.src = SILENT; player.play().catch(() => {}); }, { passive: true });
 function hush() { sayId++; player.pause(); if ("speechSynthesis" in window) speechSynthesis.cancel(); }
-async function say(t) {
+async function say(t, speaker) {
   hush();
-  if (!speakOn) { setMode("idle"); return; }
+  if (!speakOn && !speaker) { setMode("idle"); return; }
   const id = sayId;
   if (ttsOn && token && !/[\u0600-\u06FF]/.test(t)) {
     try {
-      const res = await fetch("/api/speak", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ text: t }) });
+      const res = await fetch("/api/speak", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ text: t, speaker }) });
       if (!res.ok) throw new Error("tts " + res.status);
       const url = URL.createObjectURL(await res.blob());
       if (id !== sayId) { URL.revokeObjectURL(url); return; } // something newer took over
@@ -465,6 +471,17 @@ function paintSettings(n) {
     : "Face ID / fingerprint login is not set up. Add this device to unlock without the passcode.";
   $("pkAdd").hidden = !hasPK || pkOnDevice; $("pkClear").hidden = !n;
 }
+// Voice picker. Male voices first; the full list is validated on the server.
+const MALE = ["draco", "apollo", "arcas", "aries", "atlas", "hermes", "hyperion", "jupiter", "mars", "neptune", "odysseus", "orion", "orpheus", "pluto", "saturn", "zeus"];
+function paintVoices(current) {
+  const sel = $("voiceSel"); sel.textContent = "";
+  for (const v of MALE.includes(current) || !current ? MALE : [current, ...MALE]) {
+    const o = el("option", "", v[0].toUpperCase() + v.slice(1)); o.value = v; o.selected = v === current; sel.appendChild(o);
+  }
+  sel.disabled = $("voiceTry").disabled = !ttsOn;
+}
+$("voiceSel").onchange = async () => { try { await api("/api/voice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ speaker: $("voiceSel").value }) }); $("voiceTry").click(); } catch (e) { note(e.message); } };
+$("voiceTry").onclick = () => say("Good to see you, sir. All systems are online, and for once nothing is on fire.", $("voiceSel").value);
 $("gear").onclick = () => $("settings").showModal();
 $("closeSettings").onclick = () => $("settings").close();
 $("lockNow").onclick = () => { $("settings").close(); showLogin(); };
@@ -496,7 +513,7 @@ async function start() {
     for (const m of messages) bubble(m.role, m.content, { cls: m.role === "assistant" && m.content.includes("•") ? "brief" : "" });
     $("lGoogle").querySelector(".dot").classList.toggle("on", status.google);
     $("dWa").classList.toggle("on", status.whatsapp); $("dVox").classList.toggle("on", status.voice);
-    mic.disabled = !status.voice; ttsOn = Boolean(status.tts);
+    mic.disabled = !status.voice; ttsOn = Boolean(status.tts); paintVoices(status.ttsVoice);
     paintPaused(status.paused); paintSettings((settingsCount = status.passkeys));
     const h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false }).format(new Date()));
     note(`SYSTEMS ONLINE · GOOD ${h >= 5 && h < 12 ? "MORNING" : h >= 12 && h < 18 ? "AFTERNOON" : "EVENING"}${owner ? ", " + owner.toUpperCase() : ""}`);

@@ -26,6 +26,6 @@ TIMEZONE = "Africa/Cairo"
 BRIEF_HOUR = "8"
 REPLY_LANGUAGE = "English"
 TTS_MODEL = "@cf/deepgram/aura-2-en"
-# TTS_VOICE = ""   # optional speaker name; empty = the model's default voice
+TTS_VOICE = "draco"   # default speaker; the owner can change it in the app (⚙ → Voice)
 CLAUDE_MODEL = "claude-sonnet-5-5"
 WHATSAPP_API_VERSION = "v21.0"

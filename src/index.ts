@@ -7,7 +7,7 @@ import { googleAuthUrl, googleConnected, googleExchangeCode } from "./google";
 import { loginOptions, loginVerify, registerOptions, registerVerify } from "./passkeys";
 import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "./security";
 import { resolveApproval } from "./tools";
-import type { Env } from "./types";
+import { type Env, kvGet, kvSet } from "./types";
 import { whatsappInbound, whatsappVerify } from "./whatsapp";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -16,6 +16,9 @@ const DAY = 86_400_000;
 const SESSION_TTL = 7 * DAY;
 const STAND_DOWN = /^(santino[,،]?\s*)?(stand down|stop everything|kill switch|pause everything|وقف كل حاجة|اقف كل حاجة)[\s.!]*$/i;
 const TOO_MANY = "Too many attempts. Try again in 15 minutes.";
+// Speakers of @cf/deepgram/aura-2-en (from the Workers AI model page).
+const VOICES = "amalthea andromeda apollo arcas aries asteria athena atlas aurora callista cora cordelia delia draco electra harmonia helena hera hermes hyperion iris janus juno jupiter luna mars minerva neptune odysseus ophelia orion orpheus pandora phoebe pluto saturn thalia theia vesta zeus".split(" ");
+const currentVoice = async (env: Env) => (await kvGet(env, "tts_voice")) ?? env.TTS_VOICE ?? "draco";
 const clientIp = (c: { req: { header: (n: string) => string | undefined } }) => c.req.header("cf-connecting-ip") ?? "local";
 const APPROVE = /^(approve|approved|yes|ok|okay|go ahead|send it|do it|وافق|موافق|تمام|ابعت|ابعته|ابعتها|ماشي|اه|آه|أيوه|ايوه)[\s.!؟?]*$/i;
 const REJECT = /^(reject|no|cancel|don'?t send|لا|لأ|الغي|إلغاء|الغاء|متبعتش)[\s.!؟?]*$/i;
@@ -80,6 +83,7 @@ app.get("/api/status", async (c) =>
     whatsapp: Boolean(c.env.WHATSAPP_TOKEN && c.env.WHATSAPP_PHONE_ID),
     voice: Boolean(c.env.STT_URL || c.env.AI),
     tts: Boolean(c.env.AI),
+    ttsVoice: await currentVoice(c.env),
     owner: c.env.OWNER_NAME ?? "",
     paused: await isPaused(c.env),
     passkeys: (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM passkeys").first<{ n: number }>())?.n ?? 0,
@@ -204,12 +208,16 @@ app.post("/api/transcribe", async (c) => {
 // back to the browser's built-in voice for Arabic text or on any failure.
 app.post("/api/speak", async (c) => {
   if (!c.env.AI) return c.json({ error: "Voice output is not configured" }, 501);
-  const { text } = await c.req.json<{ text?: string }>().catch(() => ({ text: undefined }));
+  const { text, speaker } = await c.req
+    .json<{ text?: string; speaker?: string }>()
+    .catch(() => ({ text: undefined, speaker: undefined }));
   const clean = (text ?? "").replace(/[•*_#`]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1500);
   if (!clean) return c.json({ error: "Nothing to say" }, 400);
   try {
+    // `speaker` in the request is only for previewing a voice before saving it.
+    const voice = speaker && VOICES.includes(speaker) ? speaker : await currentVoice(c.env);
     const input: Record<string, unknown> = { text: clean };
-    if (c.env.TTS_VOICE) input.speaker = c.env.TTS_VOICE;
+    if (VOICES.includes(voice)) input.speaker = voice;
     const run = c.env.AI.run as unknown as (m: string, i: unknown, o: unknown) => Promise<Response>;
     const res = await run.call(c.env.AI, c.env.TTS_MODEL ?? "@cf/deepgram/aura-2-en", input, { returnRawResponse: true });
     if (!res.ok || !res.body) return c.json({ error: `Voice failed (${res.status})` }, 502);
@@ -219,6 +227,13 @@ app.post("/api/speak", async (c) => {
   } catch (e) {
     return c.json({ error: `Voice failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
+});
+
+app.post("/api/voice", async (c) => {
+  const { speaker } = await c.req.json<{ speaker?: string }>().catch(() => ({ speaker: undefined }));
+  if (!speaker || !VOICES.includes(speaker)) return c.json({ error: "Unknown voice" }, 400);
+  await kvSet(c.env, "tts_voice", speaker);
+  return c.json({ ttsVoice: speaker });
 });
 
 app.get("/api/inbox", async (c) => {

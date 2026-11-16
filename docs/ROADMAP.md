@@ -42,8 +42,9 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
 - [x] Natural voice for English replies: Deepgram Aura 2 on Workers AI
       (`/api/speak`, `TTS_MODEL`, optional `TTS_VOICE`); browser voice is the
       fallback.
-- [ ] Owner picks a speaker (`TTS_VOICE`). Natural Arabic voice: needs a
-      multilingual TTS provider.
+- [x] Voice picker with preview in ⚙ (male voices, default `draco`), saved
+      in `kv.tts_voice`. Personality: dry wit, "sir" now and then.
+- [ ] Natural Arabic voice: needs a multilingual TTS provider.
 - [x] Auto-stop on silence (1.6s after speech; 90s cap).
 - [ ] Hands-free mode: auto-listen again after the reply is spoken.
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
