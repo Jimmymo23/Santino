@@ -39,7 +39,11 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       (`[ai]` binding, no extra key). `STT_URL` still overrides it.
 - [ ] Judge accuracy on real Egyptian Arabic + English use for a week; if it
       falls short, compare 2-3 other providers through `STT_URL`.
-- [ ] Neural TTS with a consistent voice, Arabic and English.
+- [x] Natural voice for English replies: Deepgram Aura 2 on Workers AI
+      (`/api/speak`, `TTS_MODEL`, optional `TTS_VOICE`); browser voice is the
+      fallback.
+- [ ] Owner picks a speaker (`TTS_VOICE`). Natural Arabic voice: needs a
+      multilingual TTS provider.
 - [x] Auto-stop on silence (1.6s after speech; 90s cap).
 - [ ] Hands-free mode: auto-listen again after the reply is spoken.
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").

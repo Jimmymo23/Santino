@@ -23,6 +23,9 @@ export interface Env {
   STT_URL?: string;
   STT_KEY?: string;
   STT_MODEL?: string;
+  /** Workers AI text-to-speech model and optional speaker name. */
+  TTS_MODEL?: string;
+  TTS_VOICE?: string;
 }
 
 export interface Tool {

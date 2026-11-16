@@ -263,8 +263,32 @@ function bubble(role, content, { type = false, label, cls = "" } = {}) {
   (function tick() { i += step; body.textContent = content.slice(0, i); down(); if (i < content.length) setTimeout(tick, 16); })();
 }
 
-function say(t) {
-  if (!speakOn || !("speechSynthesis" in window)) { setMode("idle"); return; }
+// Spoken replies: natural voice from the server when available, browser voice as fallback.
+const player = new Audio(); let ttsOn = false, sayId = 0, unlocked = false;
+const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+addEventListener("pointerdown", () => { if (unlocked) return; unlocked = true; player.src = SILENT; player.play().catch(() => {}); }, { passive: true });
+function hush() { sayId++; player.pause(); if ("speechSynthesis" in window) speechSynthesis.cancel(); }
+async function say(t) {
+  hush();
+  if (!speakOn) { setMode("idle"); return; }
+  const id = sayId;
+  if (ttsOn && token && !/[\u0600-\u06FF]/.test(t)) {
+    try {
+      const res = await fetch("/api/speak", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ text: t }) });
+      if (!res.ok) throw new Error("tts " + res.status);
+      const url = URL.createObjectURL(await res.blob());
+      if (id !== sayId) { URL.revokeObjectURL(url); return; } // something newer took over
+      player.src = url;
+      player.onplaying = () => setMode("speaking");
+      player.onended = player.onerror = () => { URL.revokeObjectURL(url); if (id === sayId) setMode("idle"); };
+      await player.play();
+      return;
+    } catch { if (id !== sayId) return; }
+  }
+  browserSay(t);
+}
+function browserSay(t) {
+  if (!("speechSynthesis" in window)) { setMode("idle"); return; }
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(t.replace(/•/g, ""));
   u.lang = /[؀-ۿ]/.test(t) ? "ar-EG" : "en-US";
@@ -346,7 +370,7 @@ async function toggleMic() {
   if (mic.disabled) { note("VOICE LINK OFFLINE — TYPE INSTEAD"); return; }
   if (rec) { rec.stop(); return; }
   try {
-    speechSynthesis.cancel();
+    hush();
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     actx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = actx.createAnalyser(); analyser.fftSize = 512; buf = new Uint8Array(analyser.fftSize);
@@ -374,7 +398,7 @@ document.querySelectorAll(".chips button").forEach((b) => (b.onclick = () => sen
 
 const speakBtn = $("speak");
 const paintSpeak = () => { speakBtn.textContent = speakOn ? "🔊" : "🔇"; speakBtn.setAttribute("aria-pressed", speakOn); };
-speakBtn.onclick = () => { speakOn = !speakOn; try { localStorage.setItem("santino_speak", speakOn ? "1" : "0"); } catch {} if (!speakOn) { speechSynthesis.cancel(); setMode("idle"); } paintSpeak(); };
+speakBtn.onclick = () => { speakOn = !speakOn; try { localStorage.setItem("santino_speak", speakOn ? "1" : "0"); } catch {} if (!speakOn) { hush(); setMode("idle"); } paintSpeak(); };
 paintSpeak();
 
 $("lGoogle").onclick = async () => {
@@ -453,7 +477,7 @@ setInterval(() => { if (token && pkOnDevice && Date.now() - lastActive > 15 * 60
 function signedIn(t) { token = t; lastActive = Date.now(); try { localStorage.setItem("santino_token", t); } catch {} $("login").hidden = true; start(); }
 function showLogin() {
   token = null; try { localStorage.removeItem("santino_token"); } catch {}
-  speechSynthesis && speechSynthesis.cancel(); log.textContent = "";
+  hush(); log.textContent = "";
   $("pkLogin").hidden = !hasPK; $("login").hidden = false;
 }
 $("login").onsubmit = async (e) => {
@@ -472,7 +496,7 @@ async function start() {
     for (const m of messages) bubble(m.role, m.content, { cls: m.role === "assistant" && m.content.includes("•") ? "brief" : "" });
     $("lGoogle").querySelector(".dot").classList.toggle("on", status.google);
     $("dWa").classList.toggle("on", status.whatsapp); $("dVox").classList.toggle("on", status.voice);
-    mic.disabled = !status.voice;
+    mic.disabled = !status.voice; ttsOn = Boolean(status.tts);
     paintPaused(status.paused); paintSettings((settingsCount = status.passkeys));
     const h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false }).format(new Date()));
     note(`SYSTEMS ONLINE · GOOD ${h >= 5 && h < 12 ? "MORNING" : h >= 12 && h < 18 ? "AFTERNOON" : "EVENING"}${owner ? ", " + owner.toUpperCase() : ""}`);

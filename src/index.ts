@@ -79,6 +79,7 @@ app.get("/api/status", async (c) =>
     google: await googleConnected(c.env),
     whatsapp: Boolean(c.env.WHATSAPP_TOKEN && c.env.WHATSAPP_PHONE_ID),
     voice: Boolean(c.env.STT_URL || c.env.AI),
+    tts: Boolean(c.env.AI),
     owner: c.env.OWNER_NAME ?? "",
     paused: await isPaused(c.env),
     passkeys: (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM passkeys").first<{ n: number }>())?.n ?? 0,
@@ -197,6 +198,27 @@ app.post("/api/transcribe", async (c) => {
   if (!res.ok) return c.json({ error: `Transcription failed (${res.status})` }, 502);
   const data = await res.json<{ text?: string }>();
   return c.json({ text: data.text ?? "" });
+});
+
+// Natural voice for spoken replies (Workers AI). English only; the app falls
+// back to the browser's built-in voice for Arabic text or on any failure.
+app.post("/api/speak", async (c) => {
+  if (!c.env.AI) return c.json({ error: "Voice output is not configured" }, 501);
+  const { text } = await c.req.json<{ text?: string }>().catch(() => ({ text: undefined }));
+  const clean = (text ?? "").replace(/[•*_#`]/g, " ").replace(/\s+/g, " ").trim().slice(0, 1500);
+  if (!clean) return c.json({ error: "Nothing to say" }, 400);
+  try {
+    const input: Record<string, unknown> = { text: clean };
+    if (c.env.TTS_VOICE) input.speaker = c.env.TTS_VOICE;
+    const run = c.env.AI.run as unknown as (m: string, i: unknown, o: unknown) => Promise<Response>;
+    const res = await run.call(c.env.AI, c.env.TTS_MODEL ?? "@cf/deepgram/aura-2-en", input, { returnRawResponse: true });
+    if (!res.ok || !res.body) return c.json({ error: `Voice failed (${res.status})` }, 502);
+    return new Response(res.body, {
+      headers: { "content-type": res.headers.get("content-type") ?? "audio/mpeg", "cache-control": "no-store" },
+    });
+  } catch (e) {
+    return c.json({ error: `Voice failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
+  }
 });
 
 app.get("/api/inbox", async (c) => {
