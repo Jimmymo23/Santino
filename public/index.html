@@ -169,7 +169,8 @@
     <button id="pkClear" class="danger" hidden>Remove all passkeys</button>
   </section>
   <section>
-    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="autoListen"> Start listening as soon as I open Santino</label>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="handsFree"> Hands-free: stay listening, act only when I say "Santino"</label>
+    <p>Say "Santino, …" to give a command. Say "Santino, stop" to cut it off. Everything else it hears is ignored.</p>
   </section>
   <section>
     <p>Voice Santino speaks with.</p>
@@ -207,7 +208,17 @@ const shown = new Set();
 const core = $("core"), cx = core.getContext("2d");
 let mode = "idle", level = 0, analyser = null, buf = null, heardAt = 0, spoke = false, recStart = 0, autoStop = true;
 const LABEL = { idle: "STANDBY", listening: "LISTENING", thinking: "PROCESSING", speaking: "SPEAKING" };
-function setMode(m) { mode = m; $("state").textContent = m === "idle" && !$("pausebar").hidden ? "PAUSED" : LABEL[m]; if (calm) draw(0); }
+let hfOn = false, hfLevel = 0, armedUntil = 0, armNext = false;
+function paintState() {
+  const armed = performance.now() < armedUntil;
+  $("state").textContent = mode !== "idle" ? LABEL[mode] : !$("pausebar").hidden ? "PAUSED" : hfOn ? (armed ? "LISTENING" : 'SAY "SANTINO"') : LABEL.idle;
+}
+function setMode(m) {
+  const was = mode; mode = m;
+  if (m === "idle" && was === "speaking" && armNext && hfOn) arm(10000); // Santino asked a question: listen for the answer
+  if (m === "idle") armNext = false;
+  paintState(); if (calm) draw(0);
+}
 function draw(t) {
   const d = Math.min(devicePixelRatio || 1, 2), w = core.clientWidth * d;
   if (core.width !== w) core.width = core.height = w;
@@ -223,8 +234,9 @@ function draw(t) {
     if (rec && rec.state === "recording" && autoStop && ((spoke && nowMs - heardAt > 1600) || nowMs - recStart > 90000 || (!spoke && nowMs - recStart > 8000))) rec.stop();
   } else if (mode === "speaking") level += ((.35 + .3 * Math.sin(s * 9) * Math.sin(s * 2.3)) - level) * .2;
   else if (mode === "thinking") level += (.25 - level) * .1;
+  else if (hfOn) level += ((performance.now() < armedUntil ? .2 : .03) + hfLevel * .6 - level) * .3;
   else level += ((.06 + .04 * Math.sin(s * 1.4)) - level) * .08;
-  const hot = mode === "listening" ? "255,93,93" : "79,227,255";
+  const hot = mode === "listening" || (hfOn && mode === "idle" && performance.now() < armedUntil) ? "255,93,93" : "79,227,255";
   const spin = mode === "thinking" ? 3.2 : mode === "idle" ? .25 : .9;
   cx.clearRect(0, 0, w, w);
   cx.lineCap = "butt";
@@ -305,16 +317,28 @@ function browserSay(t) {
   speechSynthesis.speak(u);
 }
 
+let chatAbort = null;
 async function send(msg) {
   msg = msg.trim(); if (!msg) return;
+  hush(); if (chatAbort) chatAbort.abort();
+  const ctl = (chatAbort = new AbortController());
   bubble("user", msg); setMode("thinking");
   try {
-    const out = await api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: msg }) });
+    const out = await api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: msg }), signal: ctl.signal });
+    if (ctl.signal.aborted) return;
     const { reply, paused } = out;
+    armNext = /[?؟]\s*$/.test(reply);
     bubble("assistant", reply, { type: true, cls: reply.includes("•") ? "brief" : "" }); say(reply);
     if (paused) paintPaused(true);
-  } catch (e) { note(e.message); setMode("idle"); }
+  } catch (e) { if (ctl.signal.aborted) return; note(e.message); setMode("idle"); }
+  finally { if (chatAbort === ctl) chatAbort = null; }
   pollInbox(); pollDash();
+}
+// Stop word: cut the voice and drop the reply in progress. Actions already taken stay
+// (anything outgoing still needs approval).
+function stopAll(quiet) {
+  hush(); if (chatAbort) { chatAbort.abort(); chatAbort = null; }
+  armedUntil = 0; armNext = false; setMode("idle"); if (!quiet) note("STOPPED");
 }
 
 function approvalCard(a) {
@@ -373,10 +397,105 @@ function tickClock() {
   $("clock").textContent = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit" }).format(new Date());
 }
 
+// ---------- hands-free: wake word + stop word ----------
+// The mic stays open while the app is open. Speech is cut into utterances on
+// the device; each one is transcribed, then acted on ONLY if it contains the
+// wake word (or follows it within a few seconds). Everything else is dropped.
+const NAME = "(?:santino|santeeno|sentino|centino|santina|san tino|santi no|سانتينو|سنتينو)";
+const WAKE = new RegExp("(?:^|[\\s,.!?،])(?:hey |hi |ok |okay )?" + NAME + "(?=$|[\\s,.!?،])[\\s,.!?،]*", "i");
+const STOP = new RegExp("^(?:(?:hey |ok |okay )?" + NAME + "[\\s,،]*)?(?:stop|cancel|never ?mind|that'?s all|enough|quiet|be quiet|خلاص|وقف|اسكت|كفاية)[\\s.!؟?]*$", "i");
+const JUNK = /^(thank you\.?|thanks for watching[.!]?|you\.?|bye[.!]?|شكرا\.?|[^\p{L}]*|.{0,2})$/iu;
+const hf = { stream: null, ctx: null, node: null, pre: [], seg: null, voiced: 0, quiet: 0, total: 0, floor: .004, queue: Promise.resolve() };
+
+function arm(ms) { armedUntil = performance.now() + ms; paintState(); setTimeout(paintState, ms + 50); }
+function chime() {
+  try { const o = hf.ctx.createOscillator(), g = hf.ctx.createGain(); o.frequency.value = 880; g.gain.value = .06;
+    o.connect(g).connect(hf.ctx.destination); o.start(); o.stop(hf.ctx.currentTime + .12); } catch {}
+}
+function toWav(frames, rate) {
+  const step = rate / 16000, n = Math.floor(frames.reduce((a, f) => a + f.length, 0) / step);
+  const flat = new Float32Array(frames.reduce((a, f) => a + f.length, 0)); let o = 0;
+  for (const f of frames) { flat.set(f, o); o += f.length; }
+  const view = new DataView(new ArrayBuffer(44 + n * 2)), w = (p, t) => [...t].forEach((c, i) => view.setUint8(p + i, c.charCodeAt(0)));
+  w(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true); view.setUint32(24, 16000, true); view.setUint32(28, 32000, true); view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true); w(36, "data"); view.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) { // average each block of source samples into one 16 kHz sample
+    const a = Math.floor(i * step), b = Math.max(a + 1, Math.floor((i + 1) * step)); let sum = 0;
+    for (let j = a; j < b; j++) sum += flat[j];
+    view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, sum / (b - a))) * 32767, true);
+  }
+  return new Blob([view], { type: "audio/wav" });
+}
+async function heard(blob) {
+  let t = "";
+  try { t = ((await api("/api/transcribe", { method: "POST", headers: { "content-type": "audio/wav" }, body: blob })).text || "").trim(); } catch { return; }
+  if (!hfOn || !t || JUNK.test(t)) return;
+  const busy = mode === "thinking" || mode === "speaking";
+  if (busy && STOP.test(t)) return stopAll();
+  const m = t.match(WAKE), armed = performance.now() < armedUntil;
+  if (m) {
+    let cmd = t.slice(m.index + m[0].length).trim();
+    if (!cmd && t.slice(0, m.index).trim().split(/\s+/).length >= 3) cmd = t.slice(0, m.index).trim(); // "…, Santino" at the end
+    if (STOP.test(cmd)) return stopAll();
+    if (!cmd) { if (busy) return; chime(); return arm(8000); } // just the name: wait for the command
+    armedUntil = 0; return send(cmd);
+  }
+  if (armed && !busy) { armedUntil = 0; return send(t); }
+  // No wake word: ignored on purpose.
+}
+function onAudio(e) {
+  const data = e.inputBuffer.getChannelData(0), ms = (data.length / hf.ctx.sampleRate) * 1000;
+  let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+  const rms = Math.sqrt(sum / data.length), thr = Math.max(.012, hf.floor * 3);
+  hfLevel = Math.min(1, rms * 8);
+  const frame = new Float32Array(data);
+  if (!hf.seg) {
+    if (rms < thr) hf.floor = hf.floor * .95 + rms * .05;
+    hf.pre.push(frame); if (hf.pre.length > 6) hf.pre.shift(); // ~half a second of lead-in so the wake word is not clipped
+    if (rms > thr) { hf.seg = hf.pre.splice(0); hf.voiced = ms; hf.quiet = 0; hf.total = ms; }
+    return;
+  }
+  hf.seg.push(frame); hf.total += ms;
+  if (rms > thr * .7) { hf.voiced += ms; hf.quiet = 0; } else hf.quiet += ms;
+  if (hf.quiet >= 900 || hf.total >= 20000) {
+    const frames = hf.seg, voiced = hf.voiced; hf.seg = null;
+    if (voiced >= 300) { const blob = toWav(frames, hf.ctx.sampleRate); hf.queue = hf.queue.then(() => heard(blob)); }
+  }
+}
+async function startHandsFree() {
+  if (hf.stream || mic.disabled) return;
+  try {
+    hf.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    hf.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    hf.node = hf.ctx.createScriptProcessor(4096, 1, 1);
+    hf.node.onaudioprocess = onAudio;
+    const mute = hf.ctx.createGain(); mute.gain.value = 0; // keep the graph alive without playing the mic back
+    hf.ctx.createMediaStreamSource(hf.stream).connect(hf.node); hf.node.connect(mute).connect(hf.ctx.destination);
+    await hf.ctx.resume().catch(() => {});
+    if (hf.ctx.state !== "running") {
+      note("TAP ANYWHERE ONCE TO START LISTENING");
+      addEventListener("pointerdown", () => hf.ctx && hf.ctx.resume(), { once: true });
+    }
+    hfOn = true; paintState();
+  } catch { hfOn = false; stopHandsFree(); note("MICROPHONE PERMISSION NEEDED"); }
+}
+function stopHandsFree() {
+  hfOn = false; armedUntil = 0; hfLevel = 0;
+  if (hf.node) hf.node.onaudioprocess = null;
+  if (hf.stream) hf.stream.getTracks().forEach((t) => t.stop());
+  if (hf.ctx) hf.ctx.close().catch(() => {});
+  hf.stream = hf.ctx = hf.node = hf.seg = null; hf.pre = []; paintState();
+}
+
 // ---------- voice: tap the core or the mic to start, tap again to stop ----------
 let rec = null, chunks = [], actx = null;
 async function toggleMic() {
   if (mic.disabled) { note("VOICE LINK OFFLINE — TYPE INSTEAD"); return; }
+  if (hfOn) { // hands-free: a tap stands in for the wake word
+    if (mode === "thinking" || mode === "speaking") return stopAll();
+    hush(); chime(); return arm(8000);
+  }
   if (rec) { rec.stop(); return; }
   try {
     hush();
@@ -420,11 +539,7 @@ $("lGoogle").onclick = async () => {
 };
 
 // ---------- kill switch ----------
-function paintPaused(p) {
-  $("pausebar").hidden = !p;
-  if (p) $("state").textContent = "PAUSED";
-  else if (mode === "idle") $("state").textContent = LABEL.idle;
-}
+function paintPaused(p) { $("pausebar").hidden = !p; paintState(); }
 $("resume").onclick = async () => { try { await api("/api/resume", { method: "POST" }); paintPaused(false); note("BACK ONLINE"); } catch (e) { note(e.message); } };
 $("standDown").onclick = async () => { try { await api("/api/pause", { method: "POST" }); paintPaused(true); $("settings").close(); } catch (e) { note(e.message); } };
 
@@ -489,10 +604,14 @@ function paintVoices(current) {
 }
 $("voiceSel").onchange = async () => { try { await api("/api/voice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ speaker: $("voiceSel").value }) }); $("voiceTry").click(); } catch (e) { note(e.message); } };
 $("voiceTry").onclick = () => say("Good to see you, sir. All systems are online, and for once nothing is on fire.", $("voiceSel").value);
-let autoListen = false;
-try { autoListen = localStorage.getItem("santino_autolisten") === "1"; } catch {}
-$("autoListen").checked = autoListen;
-$("autoListen").onchange = () => { autoListen = $("autoListen").checked; try { localStorage.setItem("santino_autolisten", autoListen ? "1" : "0"); } catch {} };
+let handsFreePref = false;
+try { handsFreePref = localStorage.getItem("santino_handsfree") === "1" || localStorage.getItem("santino_autolisten") === "1"; } catch {}
+$("handsFree").checked = handsFreePref;
+$("handsFree").onchange = () => {
+  handsFreePref = $("handsFree").checked;
+  try { localStorage.setItem("santino_handsfree", handsFreePref ? "1" : "0"); localStorage.removeItem("santino_autolisten"); } catch {}
+  if (handsFreePref) startHandsFree(); else stopHandsFree();
+};
 $("gear").onclick = () => $("settings").showModal();
 $("closeSettings").onclick = () => $("settings").close();
 $("lockNow").onclick = () => { $("settings").close(); showLogin(); };
@@ -505,7 +624,7 @@ setInterval(() => { if (token && pkOnDevice && Date.now() - lastActive > 15 * 60
 function signedIn(t) { token = t; lastActive = Date.now(); try { localStorage.setItem("santino_token", t); } catch {} $("login").hidden = true; start(); }
 function showLogin() {
   token = null; try { localStorage.removeItem("santino_token"); } catch {}
-  hush(); log.textContent = "";
+  hush(); stopHandsFree(); if (chatAbort) chatAbort.abort(); log.textContent = "";
   $("pkLogin").hidden = !hasPK; $("login").hidden = false;
 }
 $("login").onsubmit = async (e) => {
@@ -531,8 +650,8 @@ async function start() {
     if (!status.google) note("GOOGLE NOT LINKED · TAP GGL TO CONNECT");
     pollInbox(); pollDash();
     // One-tap access: a home-screen or lock-screen shortcut to /?listen=1 opens listening.
-    const wantsListen = new URLSearchParams(location.search).has("listen") || autoListen;
-    if (wantsListen && status.voice && !rec) { history.replaceState(null, "", "/"); toggleMic(); }
+    if (handsFreePref && status.voice) startHandsFree();
+    else if (new URLSearchParams(location.search).has("listen") && status.voice && !rec) { history.replaceState(null, "", "/"); toggleMic(); }
   } catch {}
 }
 

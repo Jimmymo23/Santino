@@ -46,14 +46,19 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       in `kv.tts_voice`. Personality: dry wit, "sir" now and then.
 - [ ] Natural Arabic voice: needs a multilingual TTS provider.
 - [x] Auto-stop on silence (1.6s after speech; 90s cap).
-- [ ] Hands-free mode: auto-listen again after the reply is spoken.
+- [x] Hands-free mode with wake word and stop word (⚙ switch, per device):
+      the mic stays open while the app is open, utterances are cut on the
+      device, transcribed, and acted on only when they contain "Santino" (or
+      follow it, or answer a question Santino just asked). "Santino, stop"
+      cuts the voice and drops the pending reply. A tap also works.
+- [ ] Server-side cancel for a run in progress (stop currently drops the
+      reply on the client; tool calls already made still complete).
+- [ ] Tune wake-word accuracy on real use (accent, noise, false triggers).
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
 - [ ] Cost meter: `usage` table (migration) logging tokens, STT seconds and
       later meeting minutes per day; `DAILY_BUDGET_USD` cap. At the cap,
       Santino stops calling paid services and says so. Today's spend on the HUD.
 - [x] `/?listen=1` opens Santino already listening.
-- [x] "Start listening as soon as I open Santino" switch in ⚙ (per device),
-      which replaces the need for a separate shortcut.
 
 ## Sprint 3 — Team loop on WhatsApp
 - [ ] Meta business app, phone number, webhook, app secret.

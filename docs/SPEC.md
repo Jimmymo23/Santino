@@ -113,8 +113,11 @@ Rules:
   approved template is required.
 - **Bookings:** there is no universal booking API. Phase 5 uses a browser
   agent or drafts the request for a human channel.
-- **Always listening:** a web app cannot listen in the background. Wake word
-  needs the Phase 6 native wrapper.
+- **Always listening:** the wake word ("Santino") works while the app is open
+  on screen. A web app cannot listen when closed or when the phone is locked;
+  that needs the Phase 6 native wrapper. In hands-free mode every utterance
+  the mic picks up is sent for transcription and discarded unless it carries
+  the wake word.
 - **Phone calls:** phones do not let an app record a normal call. Santino
   hears a call only if it is merged in through its own number or the call is
   on speaker with Listen mode on.
