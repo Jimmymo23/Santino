@@ -176,6 +176,11 @@
     <button id="pkClear" class="danger" hidden>Remove all passkeys</button>
   </section>
   <section>
+    <p id="pushState">Notifications are off on this device.</p>
+    <button id="pushOn">Turn on notifications</button>
+    <button id="pushTest" hidden>Send a test</button>
+  </section>
+  <section>
     <p id="budgetState">Spending today: –</p>
     <label style="display:flex;gap:8px;align-items:center">Daily cap $ <input id="budgetCap" type="number" min="0.25" max="50" step="0.25" style="width:84px;background:var(--panel);color:var(--text);border:1px solid var(--line2);padding:8px;font:inherit"> <button id="budgetSave" style="align-self:auto">Save</button></label>
     <button id="budgetMore">Allow $1 more today</button>
@@ -656,6 +661,42 @@ function paintVoices(current) {
 }
 $("voiceSel").onchange = async () => { try { await api("/api/voice", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ speaker: $("voiceSel").value }) }); $("voiceTry").click(); } catch (e) { note(e.message); } };
 $("voiceTry").onclick = () => say("Good to see you, sir. All systems are online, and for once nothing is on fire.", $("voiceSel").value);
+// ---------- push notifications ----------
+const pushOK = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+async function paintPush(msg) {
+  const st = $("pushState"), on = $("pushOn"), test = $("pushTest");
+  if (!pushOK) {
+    st.textContent = /iPhone|iPad/.test(navigator.userAgent)
+      ? "On iPhone, notifications work only from the home-screen icon. Open Santino from there, then come back here."
+      : "This browser does not support notifications.";
+    on.hidden = test.hidden = true; return;
+  }
+  let sub = null;
+  try { sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription(); } catch {}
+  const active = Boolean(sub) && Notification.permission === "granted";
+  st.textContent = msg || (active ? "Notifications are on for this device: reminders, briefs, follow-ups and team replies."
+    : Notification.permission === "denied" ? "Notifications are blocked for Santino in this device's settings. Allow them there, then try again."
+    : "Notifications are off on this device.");
+  on.hidden = active; test.hidden = !active;
+  // Keep the server in step with this device's subscription.
+  if (active && token) api("/api/push/subscribe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sub.toJSON()) }).catch(() => {});
+}
+$("pushOn").onclick = async () => {
+  try {
+    if ((await Notification.requestPermission()) !== "granted") return paintPush();
+    const { publicKey } = await api("/api/push/key");
+    const sub = await (await navigator.serviceWorker.ready).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64d(publicKey) });
+    await api("/api/push/subscribe", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...sub.toJSON(), label: (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "" }) });
+    paintPush();
+  } catch (e) { paintPush("Could not turn on notifications: " + e.message); }
+};
+$("pushTest").onclick = async () => {
+  try { const r = await api("/api/push/test", { method: "POST" }); paintPush(r.sent ? "Test sent. It should appear within a few seconds." : "No device accepted the test. Turn notifications off and on again."); }
+  catch (e) { paintPush(e.message); }
+};
+
 let handsFreePref = false;
 try { handsFreePref = localStorage.getItem("santino_handsfree") === "1" || localStorage.getItem("santino_autolisten") === "1"; } catch {}
 $("handsFree").checked = handsFreePref;
@@ -696,7 +737,7 @@ async function start() {
     $("lGoogle").querySelector(".dot").classList.toggle("on", status.google);
     $("dWa").classList.toggle("on", status.whatsapp); $("dVox").classList.toggle("on", status.voice);
     mic.disabled = !status.voice; ttsOn = Boolean(status.tts); paintVoices(status.ttsVoice);
-    paintPaused(status.paused); paintSettings((settingsCount = status.passkeys));
+    paintPaused(status.paused); paintSettings((settingsCount = status.passkeys)); paintPush();
     const h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false }).format(new Date()));
     note(`SYSTEMS ONLINE · GOOD ${h >= 5 && h < 12 ? "MORNING" : h >= 12 && h < 18 ? "AFTERNOON" : "EVENING"}${owner ? ", " + owner.toUpperCase() : ""}`);
     if (!status.google) note("GOOGLE NOT LINKED · TAP GGL TO CONNECT");

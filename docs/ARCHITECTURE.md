@@ -61,6 +61,9 @@ Long-term memory is Phase 2.
 - Google tokens and the cached inbox/calendar snapshot are AES-GCM encrypted
   in D1 with a key derived from `SESSION_SECRET` (`src/crypto.ts`). Rotating
   that secret means reconnecting Google.
+- Push notifications carry the reminder or brief text to the device's lock
+  screen, encrypted in transit to the device (RFC 8291). The VAPID private key
+  is stored encrypted in D1.
 - WhatsApp webhook verifies `X-Hub-Signature-256` when `WHATSAPP_APP_SECRET`
   is set. Set it.
 - Tool results from email/web/WhatsApp are wrapped as untrusted data in the

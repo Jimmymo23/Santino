@@ -2,7 +2,8 @@ import { runAgent } from "./agent";
 import { todayBounds } from "./brief";
 import { isPaused } from "./security";
 import { queueApproval } from "./tools";
-import { type Env, kvGet, kvSet, notify, now } from "./types";
+import { notify } from "./push";
+import { type Env, kvGet, kvSet, now } from "./types";
 
 export async function runCron(env: Env): Promise<void> {
   const t = now();

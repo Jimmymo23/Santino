@@ -17,7 +17,7 @@ migrations_dir = "migrations"
 binding = "AI"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]   # every minute, so reminders arrive on time
 
 [vars]
 APP_URL = "https://santino.mohamed-gsmart.workers.dev"

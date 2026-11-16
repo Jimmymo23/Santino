@@ -67,7 +67,8 @@ export async function audit(env: Env, action: string, detail?: unknown): Promise
     .run();
 }
 
-export async function notify(env: Env, kind: string, text: string): Promise<void> {
+/** In-app notification row only. Use `notify` from ./push to also push to devices. */
+export async function storeNotification(env: Env, kind: string, text: string): Promise<void> {
   await env.DB.prepare("INSERT INTO notifications (kind, text, created_at) VALUES (?, ?, ?)")
     .bind(kind, text, now())
     .run();

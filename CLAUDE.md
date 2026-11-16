@@ -51,6 +51,7 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
 - `src/whatsapp.ts` send + webhook
 - `src/security.ts` kill switch and login rate limit
 - `src/passkeys.ts` WebAuthn login; `src/crypto.ts` encrypted kv values
+- `src/push.ts` Web Push sender and `notify()`; `public/sw.js` shows them
 - `src/memory.ts` long-term memory tools and prompt context
 - `src/usage.ts` cost meter and daily budget
 - `src/brief.ts` day snapshot for HUD tiles and briefs

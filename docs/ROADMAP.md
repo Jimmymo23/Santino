@@ -132,7 +132,11 @@ See "Meetings" in `docs/SPEC.md` for the design and its limits.
 - [ ] Money, bookings and first-time recipients always need manual approval;
       no rule can override this.
 - [ ] Rules screen: list, pause, delete; every auto-approval is in the audit log.
-- [ ] Web Push notifications.
+- [x] Web Push notifications (`src/push.ts`, `public/sw.js`): VAPID keys
+      generated on first use, RFC 8291 payload encryption, per-device switch
+      in ⚙ with a test button. Reminders, briefs, follow-ups and WhatsApp
+      replies are pushed. Cron runs every minute so reminders are on time.
+- [ ] Notification actions (Authorize / Deny from the notification itself).
 - [x] Morning brief at a configurable time (`BRIEF_HOUR`, in-app; push comes with Web Push).
 - [ ] Email triage digest with suggested replies.
 

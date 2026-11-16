@@ -1,5 +1,6 @@
 import { hmacHex, safeEqual } from "./auth";
-import { type Env, type Tool, audit, notify } from "./types";
+import { notify } from "./push";
+import { type Env, type Tool, audit } from "./types";
 
 const digits = (s: string) => s.replace(/\D/g, "");
 

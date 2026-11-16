@@ -5,6 +5,7 @@ import { snapshot } from "./brief";
 import { runCron } from "./cron";
 import { googleAuthUrl, googleConnected, googleExchangeCode } from "./google";
 import { loginOptions, loginVerify, registerOptions, registerVerify } from "./passkeys";
+import { pushAll, pushPublicKey, subscribe } from "./push";
 import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "./security";
 import { listMemories } from "./memory";
 import { resolveApproval } from "./tools";
@@ -237,6 +238,21 @@ app.post("/api/speak", async (c) => {
     return c.json({ error: `Voice failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
 });
+
+// Push notifications to the owner's devices.
+app.get("/api/push/key", async (c) => c.json({ publicKey: await pushPublicKey(c.env) }));
+app.post("/api/push/subscribe", async (c) => {
+  const r = await subscribe(c.env, await c.req.json().catch(() => ({})));
+  return c.json(r, r.ok ? 200 : 400);
+});
+app.post("/api/push/unsubscribe", async (c) => {
+  const { endpoint } = await c.req.json<{ endpoint?: string }>().catch(() => ({ endpoint: undefined }));
+  if (endpoint) await c.env.DB.prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").bind(endpoint).run();
+  return c.json({ ok: true });
+});
+app.post("/api/push/test", async (c) =>
+  c.json({ sent: await pushAll(c.env, "Santino · Test", "Notifications are working, sir.", "test") }),
+);
 
 app.get("/api/memories", async (c) => c.json({ memories: await listMemories(c.env) }));
 app.delete("/api/memories/:id", async (c) => {
