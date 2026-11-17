@@ -66,6 +66,16 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       voice starts on the first sentence, end-of-speech pause 650ms, chime on
       accepted command. Each turn logs `turn_timing` (ms, steps, tools) in
       `audit` for tuning.
+- [x] Voice fix pass: natural voice plays through the mic's Web Audio
+      context in hands-free mode (iPhone blocked the <audio> element without a
+      tap, so it fell back to the robotic browser voice); "TAP TO LISTEN" on
+      the core when the phone holds the mic; mic recovers after the app was in
+      the background; asleep, utterances go to Nova-3 (fast, English, keyterm
+      "Santino") one at a time with only the newest kept, so background talk
+      cannot delay the wake word; tolerant wake matching (edit distance,
+      split words, Arabic spellings); finished sentences sent 0.25s after the
+      transcript; ⚙ → "What Santino heard" (on device only);
+      `client:turn` / `client:tts_fail` timings in `audit`.
 - [ ] Streaming replies (speak while the model is still writing) and an
       on-device wake word, if latency is still not good enough.
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").

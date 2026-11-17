@@ -198,6 +198,10 @@
     <p>Say "Santino" to start. Then just talk: it waits for you to finish, and you can interrupt it. It stays in the conversation for 20 seconds after each reply. "Stop" cuts it off; "that's all" ends the conversation.</p>
   </section>
   <section>
+    <button id="heardOpen">What Santino heard</button>
+    <div id="heardBox" hidden><div id="heardList" style="max-height:40vh;overflow-y:auto;margin:0 -16px"></div></div>
+  </section>
+  <section>
     <p>Voice Santino speaks with.</p>
     <select id="voiceSel" aria-label="Voice"></select>
     <button id="voiceTry">Preview</button>
@@ -243,7 +247,8 @@ let hfOn = false, hfLevel = 0, armedUntil = 0; // armedUntil: awake (in conversa
 const AWAKE_MS = 20000;
 function paintState() {
   const awake = performance.now() < armedUntil;
-  $("state").textContent = mode !== "idle" ? LABEL[mode] : !$("pausebar").hidden ? "PAUSED" : hfOn ? (awake ? "LISTENING" : 'SAY "SANTINO"') : LABEL.idle;
+  const blocked = hfOn && typeof hf !== "undefined" && hf.ctx && hf.ctx.state !== "running";
+  $("state").textContent = mode !== "idle" ? LABEL[mode] : !$("pausebar").hidden ? "PAUSED" : blocked ? "TAP TO LISTEN" : hfOn ? (awake ? "LISTENING" : 'SAY "SANTINO"') : LABEL.idle;
 }
 function setMode(m) {
   const was = mode; mode = m;
@@ -316,36 +321,76 @@ function bubble(role, content, { type = false, label, cls = "" } = {}) {
   return box;
 }
 
-// Spoken replies: natural voice from the server when available, browser voice as fallback.
-const player = new Audio(); let ttsOn = false, sayId = 0, unlocked = false;
+// ---------- voice output ----------
+// Natural voice from the server, browser voice only as a last resort. While the
+// mic is open (hands-free) the voice plays through the same Web Audio context
+// as the mic: on iPhone that keeps working without a tap, unlike an <audio>
+// element, which the phone blocks until the screen is touched.
+const player = new Audio(); let ttsOn = false, sayId = 0, unlocked = false, lastPlayback = "";
 const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
-addEventListener("pointerdown", () => { if (unlocked) return; unlocked = true; player.src = SILENT; player.play().catch(() => {}); }, { passive: true });
-let cancelPlay = null;
-function hush() { sayId++; player.pause(); if (cancelPlay) { cancelPlay(); cancelPlay = null; } if ("speechSynthesis" in window) speechSynthesis.cancel(); }
+addEventListener("pointerdown", () => {
+  if (typeof hf !== "undefined" && hf.ctx && hf.ctx.state !== "running") hf.ctx.resume().then(paintState).catch(() => {});
+  if (unlocked) return; unlocked = true; player.src = SILENT; player.play().catch(() => {});
+}, { passive: true });
+function diag(event, data) {
+  if (!token) return;
+  fetch("/api/diag", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ event, data }) }).catch(() => {});
+}
+let cur = null; // the piece of speech playing now: { stop, pause, resume }
+function hush() { sayId++; if (cur) { const c = cur; cur = null; c.stop(); } player.pause(); if ("speechSynthesis" in window) speechSynthesis.cancel(); }
 // Split a reply so the first sentence can start playing while the rest is still being voiced.
 function speechChunks(t) {
-  const parts = t.replace(/•/g, " ").match(/[^.!?؟\n]+[.!?؟]*\s*/g) || [t], out = []; let cur = "";
+  const parts = t.replace(/•/g, " ").match(/[^.!?؟\n]+[.!?؟]*\s*/g) || [t], out = []; let c = "";
   for (const p of parts) {
-    if (!out.length && !cur && p.trim().length > 12) { out.push(p.trim()); continue; }
-    if ((cur + p).length > 220 && cur.trim()) { out.push(cur.trim()); cur = p; } else cur += p;
+    if (!out.length && !c && p.trim().length > 12) { out.push(p.trim()); continue; }
+    if ((c + p).length > 220 && c.trim()) { out.push(c.trim()); c = p; } else c += p;
   }
-  if (cur.trim()) out.push(cur.trim());
+  if (c.trim()) out.push(c.trim());
   return out.filter((x) => /[\p{L}\p{N}]/u.test(x));
 }
-function playBlob(blob) {
-  return new Promise((done, fail) => {
-    const url = URL.createObjectURL(blob), end = (f) => () => { URL.revokeObjectURL(url); cancelPlay = null; f(); };
-    cancelPlay = end(done);
-    player.src = url; player.onplaying = () => setMode("speaking");
-    player.onended = end(done); player.onerror = end(() => fail(new Error("audio")));
-    player.play().catch(end(() => fail(new Error("audio"))));
+async function playWebAudio(ctx, blob) {
+  const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+  return new Promise((done) => {
+    let src = null, offset = 0, startedAt = 0, finished = false;
+    const fin = () => { if (finished) return; finished = true; if (cur === h) cur = null; done(); };
+    const start = () => {
+      const s = ctx.createBufferSource(); s.buffer = buf; s.connect(ctx.destination);
+      s.onended = () => { if (s === src && !h.paused) fin(); };
+      src = s; startedAt = ctx.currentTime; s.start(0, offset);
+    };
+    const h = {
+      paused: false,
+      stop() { h.paused = true; try { src && src.stop(); } catch {} fin(); },
+      pause() { if (h.paused || finished) return; h.paused = true; offset += ctx.currentTime - startedAt; try { src.stop(); } catch {} },
+      resume() { if (!h.paused || finished) return; h.paused = false; if (offset >= buf.duration - .05) return fin(); start(); },
+    };
+    cur = h; lastPlayback = "webaudio"; setMode("speaking"); start();
   });
 }
-async function say(t, speaker) {
+function playElement(blob) {
+  return new Promise((done, fail) => {
+    const url = URL.createObjectURL(blob); let finished = false;
+    const end = (f) => () => { if (finished) return; finished = true; URL.revokeObjectURL(url); if (cur === h) cur = null; f(); };
+    const h = { stop: end(done), pause() { player.pause(); }, resume() { player.play().catch(() => {}); } };
+    cur = h; lastPlayback = "element";
+    player.src = url; player.onplaying = () => setMode("speaking");
+    player.onended = end(done); player.onerror = end(() => fail(new Error("element error")));
+    player.play().catch((e) => end(() => fail(new Error("element " + ((e && e.name) || "blocked"))))());
+  });
+}
+async function playBlob(blob) {
+  const ctx = typeof hf !== "undefined" ? hf.ctx : null;
+  if (ctx && ctx.state === "running") {
+    try { return await playWebAudio(ctx, blob); }
+    catch (e) { diag("tts_fail", { stage: "webaudio", error: String((e && e.message) || e) }); }
+  }
+  return playElement(blob);
+}
+async function say(t, speaker, meta) {
   hush();
   if (!speakOn && !speaker) { setMode("idle"); return; }
   const id = sayId;
-  if (ttsOn && token && !/[\u0600-\u06FF]/.test(t)) {
+  if (ttsOn && token && !/[؀-ۿ]/.test(t)) {
     const voice = (text) => fetch("/api/speak", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ text, speaker }) })
       .then((r) => { if (!r.ok) throw new Error("tts " + r.status); return r.blob(); });
     const pending = speechChunks(t).map(voice); // all requested at once; the short first one returns first
@@ -354,12 +399,19 @@ async function say(t, speaker) {
     try {
       for (const p of pending) {
         const blob = await p; if (id !== sayId) return;
+        if (!played && meta) { lastPlayback = typeof hf !== "undefined" && hf.ctx && hf.ctx.state === "running" ? "webaudio" : "element"; meta.voiceAt = performance.now(); reportTurn(meta); }
         await playBlob(blob); if (id !== sayId) return;
         played++;
       }
       setMode("idle"); return;
-    } catch { if (id !== sayId) return; if (played) { setMode("idle"); return; } }
+    } catch (e) {
+      if (id !== sayId) return;
+      diag("tts_fail", { stage: played ? "later" : "first", error: String((e && e.message) || e), ctx: typeof hf !== "undefined" && hf.ctx ? hf.ctx.state : "none", handsFree: hfOn, unlocked });
+      if (played) { setMode("idle"); return; }
+    }
   }
+  lastPlayback = "browser";
+  if (meta) { meta.voiceAt = performance.now(); reportTurn(meta); }
   browserSay(t);
 }
 function browserSay(t) {
@@ -370,10 +422,19 @@ function browserSay(t) {
   u.onstart = () => setMode("speaking"); u.onend = u.onerror = () => setMode("idle");
   speechSynthesis.speak(u);
 }
+// Where the time went in one spoken exchange (no words, only timings).
+function reportTurn(m) {
+  const r = (a, b) => (a && b ? Math.round(b - a) : null);
+  diag("turn", {
+    end_of_speech_to_send: r(m.speechEnd, m.sendAt), stt_round_trip: m.sttRound ?? null, stt_server: m.sttServer ?? null, stt_engine: m.sttEngine ?? null,
+    thinking: r(m.sendAt, m.replyAt), voice_ready: r(m.replyAt, m.voiceAt), total: r(m.speechEnd || m.sendAt, m.voiceAt), playback: lastPlayback || "pending", hands_free: hfOn,
+  });
+}
 
 let chatAbort = null, turnId = null, lastSent = "", lastReply = "", lastBubble = null;
-async function send(msg) {
+async function send(msg, meta) {
   msg = msg.trim(); if (!msg) return;
+  meta = meta || {}; meta.sendAt = performance.now();
   hush(); cancelTurn();
   const ctl = (chatAbort = new AbortController()), turn = (turnId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()));
   lastSent = msg;
@@ -382,8 +443,8 @@ async function send(msg) {
     const out = await api("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: msg, turn }), signal: ctl.signal });
     if (ctl.signal.aborted || out.cancelled) return;
     const { reply, paused } = out;
-    lastReply = reply;
-    bubble("assistant", reply, { type: true, cls: reply.includes("•") ? "brief" : "" }); say(reply);
+    lastReply = reply; meta.replyAt = performance.now();
+    bubble("assistant", reply, { type: true, cls: reply.includes("•") ? "brief" : "" }); say(reply, undefined, meta);
     if (paused) paintPaused(true);
   } catch (e) { if (ctl.signal.aborted) return; note(e.message); setMode("idle"); }
   finally { if (chatAbort === ctl) { chatAbort = null; turnId = null; } }
@@ -483,6 +544,7 @@ async function openMemory() {
   } catch (e) { box.textContent = e.message; }
   $("settings").close(); $("memory").showModal();
 }
+$("heardOpen").onclick = () => { const b = $("heardBox"); b.hidden = !b.hidden; if (!b.hidden) paintHeardLog(); };
 $("memOpen").onclick = openMemory; $("memClose").onclick = () => $("memory").close();
 
 function tickClock() {
@@ -497,27 +559,71 @@ function tickClock() {
 //  - speaking over it pauses its voice, and real words replace its reply;
 //  - adding something while it is thinking restarts the request with both parts.
 const NAME = "(?:santino|santeeno|sentino|centino|santina|san tino|santi no|سانتينو|سنتينو)";
-const WAKE = new RegExp("(?:^|[\\s,.!?،])(?:hey |hi |ok |okay )?" + NAME + "(?=$|[\\s,.!?،])[\\s,.!?،]*", "i");
+const WAKE = new RegExp("(?:^|[\\s,.!?،])(?:hey |hi |ok |okay |يا )?" + NAME + "(?=$|[\\s,.!?،'’])['’s]*[\\s,.!?،]*", "i");
 const STOP = /^(?:stop|stop it|cancel|wait|hold on|never ?mind|enough|quiet|be quiet|وقف|استنى|اسكت|كفاية)[\s.!؟?]*$/i;
 const SLEEP = /^(?:that'?s all|that is all|go to sleep|sleep|stand by|goodbye|bye|thanks?(?: you)?|thank you very much|خلاص|شكرا|تمام خلاص)[\s.!؟?]*$/i;
 const JUNK = /^(thanks for watching[.!]?|you\.?|[^\p{L}]*|.{0,2})$/iu;
 const TRAILING = /(?:[,،…-]|\b(?:and|but|so|or|because|then|also|with|to|the|a|و|بس|عشان|لكن|او|أو))\s*$/i;
-const hf = { stream: null, ctx: null, node: null, pre: [], seg: null, voiced: 0, quiet: 0, total: 0, floor: .004, queue: Promise.resolve(), flagged: false };
-let pending = "", graceTimer = null, transcribing = 0, softPaused = false, sleepTimer = null;
+const hf = { stream: null, ctx: null, node: null, pre: [], seg: null, voiced: 0, quiet: 0, total: 0, floor: .004, queue: Promise.resolve(), flagged: false, lastSegEnd: 0 };
+let pending = "", pendingMeta = null, graceTimer = null, transcribing = 0, softPaused = false, sleepTimer = null, wakeBusy = false, wakeNext = null;
 
+function isAwake() { return performance.now() < armedUntil || mode === "speaking" || mode === "thinking" || Boolean(pending); }
 function arm(ms) { armedUntil = performance.now() + ms; paintState(); clearTimeout(sleepTimer); sleepTimer = setTimeout(paintState, ms + 60); }
-function sleepNow() { armedUntil = 0; pending = ""; clearTimeout(graceTimer); paintHearing(); paintState(); }
+function sleepNow() { armedUntil = 0; pending = ""; pendingMeta = null; clearTimeout(graceTimer); paintHearing(); paintState(); }
 function paintHearing() { const h = $("hearing"); h.hidden = !pending; h.textContent = pending ? "“" + pending + "…”" : ""; }
 function chime() {
   try { const o = hf.ctx.createOscillator(), g = hf.ctx.createGain(); o.frequency.value = 880; g.gain.value = .06;
     o.connect(g).connect(hf.ctx.destination); o.start(); o.stop(hf.ctx.currentTime + .12); } catch {}
 }
-function softPause() { if (softPaused || mode !== "speaking") return; softPaused = true; player.pause(); try { speechSynthesis.pause(); } catch {} }
-function resumeSpeech() { if (!softPaused) return; softPaused = false; if (mode === "speaking") { player.play().catch(() => {}); try { speechSynthesis.resume(); } catch {} } }
+function softPause() { if (softPaused || mode !== "speaking") return; softPaused = true; if (cur) cur.pause(); try { speechSynthesis.pause(); } catch {} }
+function resumeSpeech() { if (!softPaused) return; softPaused = false; if (mode === "speaking") { if (cur) cur.resume(); try { speechSynthesis.resume(); } catch {} } }
 // Is this just Santino's own voice coming back through the microphone?
 function isEcho(t) {
   const w = t.toLowerCase().match(/[\p{L}\p{N}']+/gu) || [], said = new Set(lastReply.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []);
   return w.length >= 2 && w.filter((x) => said.has(x)).length / w.length >= .6;
+}
+function lev(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+// Find "Santino" in a transcript, allowing for how speech-to-text tends to
+// mishear it ("Sentino", "Santina", "San Tino", Arabic spellings). Returns the
+// span to cut out, or null.
+function findWake(t) {
+  const m = t.match(WAKE); if (m) return { start: m.index, end: m.index + m[0].length };
+  const words = []; const re = /[\p{L}'’]+/gu; let x;
+  while ((x = re.exec(t))) words.push({ w: x[0].toLowerCase().replace(/['’]s?$/, ""), s: x.index, e: x.index + x[0].length });
+  for (let i = 0; i < words.length; i++) for (const span of [1, 2]) {
+    if (i + span > words.length) continue;
+    const w = words.slice(i, i + span).map((o) => o.w).join("");
+    if (!/^[scz]/.test(w) || w.length < 6 || w.length > 9) continue;
+    if (lev(w, "santino") <= (w.length >= 7 ? 2 : 1)) {
+      let end = words[i + span - 1].e; while (end < t.length && /[\s,.!?،]/.test(t[end])) end++;
+      return { start: words[i].s, end };
+    }
+  }
+  const a = t.match(/(?:يا\s*)?س[اآ]?ن[تط]ي?ن[وو]?[\s,،.!؟]*/);
+  return a ? { start: a.index, end: a.index + a[0].length } : null;
+}
+// Recent things the mic picked up and what Santino did with them. Kept on this
+// device only, for troubleshooting ("why didn't it hear me?").
+const heardLog = [];
+function logHeard(text, r, decision) {
+  heardLog.unshift({ at: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }), text, engine: r.engine || "", ms: r.round || 0, decision });
+  heardLog.length = Math.min(heardLog.length, 25);
+  if (!$("heardBox").hidden) paintHeardLog();
+}
+function paintHeardLog() {
+  const box = $("heardList"); box.textContent = "";
+  if (!heardLog.length) { box.appendChild(el("p", "", "Nothing yet. Turn on hands-free and say “Santino”.")); return; }
+  for (const h of heardLog) {
+    const row = el("div", "mem"), body = el("div"); body.dir = "auto";
+    body.append(el("small", "", `${h.at} · ${h.decision} · ${h.engine} ${h.ms ? (h.ms / 1000).toFixed(1) + "s" : ""}`), document.createTextNode(h.text || "(silence)"));
+    row.append(body); box.appendChild(row);
+  }
 }
 function toWav(frames, rate) {
   const step = rate / 16000, n = Math.floor(frames.reduce((a, f) => a + f.length, 0) / step);
@@ -534,38 +640,71 @@ function toWav(frames, rate) {
   }
   return new Blob([view], { type: "audio/wav" });
 }
-// Wait for the speaker to finish: longer when the sentence is clearly unfinished.
+// Wait for the speaker to finish. By the time a transcript arrives he has
+// already been quiet for ~0.7s plus the transcription time, so a finished
+// sentence goes almost at once; an unfinished one gets more time.
 function scheduleGrace() {
   clearTimeout(graceTimer); if (!pending) return;
   const complete = /[.!?؟]["')\]]?$/.test(pending) && !TRAILING.test(pending.replace(/[.!?؟]+$/, ""));
   graceTimer = setTimeout(() => {
     if (hf.seg || transcribing) return scheduleGrace(); // still talking, or the last words are still being transcribed
-    const msg = pending; pending = ""; paintHearing();
-    if (msg) { chime(); send(msg); }
-  }, complete ? 900 : 2000);
+    const msg = pending, meta = pendingMeta || {}; pending = ""; pendingMeta = null; paintHearing();
+    if (msg) { chime(); send(msg, meta); }
+  }, complete ? 250 : 1500);
 }
-async function heard(blob) {
-  let t = "";
-  try { t = ((await api("/api/transcribe", { method: "POST", headers: { "content-type": "audio/wav" }, body: blob })).text || "").trim(); } catch {}
+async function transcribe(blob, engine) {
+  const t0 = performance.now();
+  const out = await api("/api/transcribe" + (engine === "wake" ? "?engine=wake" : ""), { method: "POST", headers: { "content-type": "audio/wav" }, body: blob });
+  return { text: (out.text || "").trim(), ms: out.ms || 0, engine: out.engine || engine, round: Math.round(performance.now() - t0) };
+}
+// A finished stretch of speech. Asleep: one transcription at a time on the fast
+// engine, and only the newest waiting stretch is kept, so background talk can
+// never build a backlog that delays the wake word. Awake: transcribe at once.
+function submitSegment(blob, segEnd) {
+  if (!isAwake()) {
+    if (wakeBusy) { wakeNext = { blob, segEnd }; return; }
+    wakeBusy = true; transcribing++;
+    transcribe(blob, "wake").catch(() => ({ text: "", engine: "error", round: 0 }))
+      .then((r) => (hf.queue = hf.queue.then(() => handle(r, blob, segEnd)).catch(() => {})))
+      .finally(() => {
+        transcribing--; wakeBusy = false;
+        const n = wakeNext; wakeNext = null; if (n) submitSegment(n.blob, n.segEnd);
+      });
+    return;
+  }
+  transcribing++;
+  const p = transcribe(blob, "whisper").catch(() => ({ text: "", engine: "error", round: 0 }));
+  hf.queue = hf.queue.then(async () => handle(await p, blob, segEnd)).catch(() => {}).then(() => { transcribing--; });
+}
+async function handle(r, blob, segEnd) {
   if (!hfOn) return;
+  let t = r.text;
   const speaking = mode === "speaking", thinking = mode === "thinking";
-  if (!t || JUNK.test(t) || (speaking && isEcho(t))) { resumeSpeech(); return scheduleGrace(); } // noise or its own echo
-  const awake = performance.now() < armedUntil || speaking || thinking || Boolean(pending);
-  const m = t.match(WAKE);
-  if (!m && !awake) return; // asleep and not addressed: ignored on purpose
+  if (!t || JUNK.test(t)) { logHeard(t, r, "noise"); resumeSpeech(); return scheduleGrace(); }
+  if (speaking && isEcho(t)) { logHeard(t, r, "its own voice"); resumeSpeech(); return scheduleGrace(); }
+  const awake = isAwake();
+  let w = findWake(t);
+  if (!w && !awake) { logHeard(t, r, "ignored: no “Santino”"); return; }
   let text = t;
-  if (m && !awake) { // waking up: the command is what follows the name (or precedes it, "…, Santino")
-    text = t.slice(m.index + m[0].length).trim();
-    if (!text && t.slice(0, m.index).trim().split(/\s+/).length >= 3) text = t.slice(0, m.index).trim();
-    arm(AWAKE_MS); if (!text) return chime();
-  } else if (m) text = (t.slice(0, m.index) + " " + t.slice(m.index + m[0].length)).trim(); // name used mid-conversation
-  if (SLEEP.test(text)) { stopAll(true); sleepNow(); return note("STANDING BY"); }
-  if (STOP.test(text)) { if (speaking || thinking) stopAll(true); pending = ""; paintHearing(); clearTimeout(graceTimer); return arm(AWAKE_MS); }
+  if (w && !awake) { // waking up: the command is what follows the name (or precedes it, "…, Santino")
+    text = t.slice(w.end).trim();
+    if (!text && t.slice(0, w.start).trim().split(/\s+/).length >= 3) text = t.slice(0, w.start).trim();
+    arm(AWAKE_MS);
+    if (!text) { logHeard(t, r, "woke up"); return chime(); }
+    if (r.engine === "nova") { // the fast engine is English-only: re-read the command with the mixed-language one
+      try { const r2 = await transcribe(blob, "whisper"); const w2 = findWake(r2.text); const t2 = w2 ? r2.text.slice(w2.end).trim() : r2.text;
+        if (t2) { text = t2; r = { ...r2, round: r.round + r2.round }; } } catch {}
+    }
+  } else if (w) text = (t.slice(0, w.start) + " " + t.slice(w.end)).trim(); // name used mid-conversation
+  if (SLEEP.test(text)) { logHeard(t, r, "end of conversation"); stopAll(true); sleepNow(); return note("STANDING BY"); }
+  if (STOP.test(text)) { logHeard(t, r, "stop"); if (speaking || thinking) stopAll(true); pending = ""; pendingMeta = null; paintHearing(); clearTimeout(graceTimer); return arm(AWAKE_MS); }
   if (!text) { resumeSpeech(); return; }
   // Real words addressed to Santino.
-  if (thinking) { text = (lastSent + " " + text).trim(); stopAll(true); if (lastBubble) lastBubble.remove(); } // he added something: redo the request with both parts
-  else if (speaking) stopAll(true);                                        // he spoke over the reply: the reply is dropped
-  pending = (pending + " " + text).trim(); paintHearing(); arm(AWAKE_MS); scheduleGrace();
+  if (thinking) { text = (lastSent + " " + text).trim(); stopAll(true); if (lastBubble) lastBubble.remove(); logHeard(t, r, "added to the request"); } // redo with both parts
+  else { if (speaking) stopAll(true); logHeard(t, r, speaking ? "interrupted" : "heard"); }               // spoke over the reply: it is dropped
+  pending = (pending + " " + text).trim(); paintHearing(); arm(AWAKE_MS);
+  pendingMeta = { speechEnd: segEnd, sttRound: r.round, sttServer: r.ms, sttEngine: r.engine };
+  scheduleGrace();
 }
 function onAudio(e) {
   const data = e.inputBuffer.getChannelData(0), ms = (data.length / hf.ctx.sampleRate) * 1000;
@@ -587,12 +726,11 @@ function onAudio(e) {
     hf.flagged = true; clearTimeout(graceTimer); // he is still talking: do not send yet
     softPause();                                  // and if Santino is talking, it stops to listen
   }
-  if (hf.quiet >= 700 || hf.total >= 30000) {
-    const frames = hf.seg, voiced = hf.voiced; hf.seg = null;
-    if (voiced >= 300) {
-      const blob = toWav(frames, hf.ctx.sampleRate); transcribing++;
-      hf.queue = hf.queue.then(() => heard(blob)).catch(() => {}).then(() => { transcribing--; });
-    } else scheduleGrace();
+  // Asleep, cut long stretches (TV, other people) at 8s so the name is checked quickly.
+  if (hf.quiet >= 700 || hf.total >= (isAwake() ? 30000 : 8000)) {
+    const frames = hf.seg, voiced = hf.voiced; hf.seg = null; hf.lastSegEnd = performance.now();
+    if (voiced >= 300) submitSegment(toWav(frames, hf.ctx.sampleRate), hf.lastSegEnd);
+    else scheduleGrace();
   }
 }
 async function startHandsFree() {
@@ -604,16 +742,13 @@ async function startHandsFree() {
     hf.node.onaudioprocess = onAudio;
     const mute = hf.ctx.createGain(); mute.gain.value = 0; // keep the graph alive without playing the mic back
     hf.ctx.createMediaStreamSource(hf.stream).connect(hf.node); hf.node.connect(mute).connect(hf.ctx.destination);
+    hf.ctx.onstatechange = paintState;
     await hf.ctx.resume().catch(() => {});
-    if (hf.ctx.state !== "running") {
-      note("TAP ANYWHERE ONCE TO START LISTENING");
-      addEventListener("pointerdown", () => hf.ctx && hf.ctx.resume(), { once: true });
-    }
-    hfOn = true; paintState();
+    hfOn = true; paintState(); // shows "TAP TO LISTEN" until the phone lets the mic run
   } catch { hfOn = false; stopHandsFree(); note("MICROPHONE PERMISSION NEEDED"); }
 }
 function stopHandsFree() {
-  hfOn = false; armedUntil = 0; hfLevel = 0; pending = ""; clearTimeout(graceTimer); softPaused = false; paintHearing();
+  hfOn = false; armedUntil = 0; hfLevel = 0; pending = ""; pendingMeta = null; clearTimeout(graceTimer); softPaused = false; wakeNext = null; paintHearing();
   if (hf.node) hf.node.onaudioprocess = null;
   if (hf.stream) hf.stream.getTracks().forEach((t) => t.stop());
   if (hf.ctx) hf.ctx.close().catch(() => {});
@@ -827,7 +962,16 @@ async function start() {
 tickClock(); setInterval(tickClock, 15000);
 if (token) start(); else showLogin();
 setInterval(pollInbox, 20000); setInterval(pollDash, 60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) { pollInbox(); pollDash(); } });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  pollInbox(); pollDash();
+  // Coming back to the app: the phone may have stopped the mic or paused audio while it was in the background.
+  if (hfOn) {
+    const dead = !hf.stream || hf.stream.getAudioTracks().every((t) => t.readyState === "ended");
+    if (dead || (hf.ctx && hf.ctx.state === "closed")) { stopHandsFree(); startHandsFree(); }
+    else if (hf.ctx && hf.ctx.state !== "running") hf.ctx.resume().then(paintState).catch(paintState);
+  }
+});
 </script>
 </body>
 </html>

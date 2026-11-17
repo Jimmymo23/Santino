@@ -10,6 +10,7 @@ export const prices = (env: Env) => ({
   claudeIn: num(env.PRICE_IN_PER_MTOK, 2) / 1e6, // USD per input token
   claudeOut: num(env.PRICE_OUT_PER_MTOK, 10) / 1e6,
   sttPerSecond: 0.000513 / 60,
+  novaPerSecond: 0.0052 / 60,
   ttsPerChar: 0.03 / 1000,
 });
 

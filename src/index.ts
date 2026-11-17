@@ -10,7 +10,7 @@ import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "
 import { listMemories } from "./memory";
 import { resolveApproval } from "./tools";
 import { extendBudget, overBudget, prices, record, setBudget, spendToday } from "./usage";
-import { type Env, kvGet, kvSet } from "./types";
+import { type Env, audit, kvGet, kvSet } from "./types";
 import { whatsappInbound, whatsappVerify } from "./whatsapp";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -179,38 +179,76 @@ app.post("/api/chat/cancel", async (c) => {
   return c.json({ ok: true });
 });
 
+// Speech to text. `?engine=wake` is the fast path used while Santino waits for
+// its name: Deepgram Nova-3 (English, "Santino" boosted), falling back to
+// Whisper. Everything else uses Whisper, which handles Egyptian Arabic mixed
+// with English. The response carries `ms` and `engine` so the app can report
+// where time goes.
+const toB64 = (bytes: Uint8Array) => {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
+
+async function whisper(env: Env, bytes: Uint8Array): Promise<string> {
+  const out = (await env.AI!.run("@cf/openai/whisper-large-v3-turbo", {
+    audio: toB64(bytes),
+    task: "transcribe",
+    vad_filter: true,
+    initial_prompt: STT_HINT,
+  })) as { text?: string };
+  const text = (out.text ?? "").trim();
+  return text === STT_HINT ? "" : text; // Whisper sometimes echoes the hint back on silent audio
+}
+
+async function nova(env: Env, bytes: Uint8Array, type: string): Promise<string> {
+  const run = env.AI!.run as unknown as (m: string, i: unknown) => Promise<any>;
+  const out = await run.call(env.AI, "@cf/deepgram/nova-3", {
+    audio: { body: new Blob([bytes], { type }).stream(), contentType: type },
+    language: "en",
+    keyterm: "Santino",
+    punctuate: true,
+    smart_format: true,
+  });
+  const t = out?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? out?.text;
+  if (typeof t !== "string") throw new Error("Unexpected Nova response");
+  return t.trim();
+}
+
 app.post("/api/transcribe", async (c) => {
   if (!c.env.STT_URL && !c.env.AI) return c.json({ error: "Voice is not configured" }, 501);
   const audio = await c.req.blob();
   if (audio.size > 20 * 1024 * 1024) return c.json({ error: "Recording too long" }, 413);
-  if (audio.size < 1500) return c.json({ text: "" });
+  if (audio.size < 1500) return c.json({ text: "", ms: 0 });
   if (await overBudget(c.env)) return c.json({ error: "Daily budget reached" }, 402);
   // 16 kHz mono WAV from hands-free is exact; other formats are a rough estimate (~32 kbps).
   const seconds = audio.type.includes("wav") ? (audio.size - 44) / 32000 : audio.size / 4000;
-  await record(c.env, "stt", seconds, seconds * prices(c.env).sttPerSecond);
+  const started = Date.now();
 
   if (!c.env.STT_URL && c.env.AI) {
-    // Default: Whisper on Workers AI. No extra account or key needed.
     const bytes = new Uint8Array(await audio.arrayBuffer());
-    let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const wantWake = c.req.query("engine") === "wake" || c.req.query("engine") === "nova";
+    if (wantWake) {
+      try {
+        const text = await nova(c.env, bytes, audio.type || "audio/wav");
+        await record(c.env, "stt", seconds, seconds * prices(c.env).novaPerSecond);
+        return c.json({ text, ms: Date.now() - started, engine: "nova" });
+      } catch (e) {
+        await audit(c.env, "stt_nova_failed", { error: e instanceof Error ? e.message : String(e) });
+      }
+    }
     try {
-      const out = (await c.env.AI.run("@cf/openai/whisper-large-v3-turbo", {
-        audio: btoa(bin),
-        task: "transcribe",
-        vad_filter: true,
-        initial_prompt: STT_HINT,
-      })) as { text?: string };
-      const text = (out.text ?? "").trim();
-      // Whisper sometimes echoes the hint back on silent audio.
-      return c.json({ text: text === STT_HINT ? "" : text });
+      const text = await whisper(c.env, bytes);
+      await record(c.env, "stt", seconds, seconds * prices(c.env).sttPerSecond);
+      return c.json({ text, ms: Date.now() - started, engine: "whisper" });
     } catch (e) {
       return c.json({ error: `Transcription failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
     }
   }
 
+  await record(c.env, "stt", seconds, seconds * prices(c.env).sttPerSecond);
   const form = new FormData();
-  const ext = audio.type.includes("mp4") ? "mp4" : "webm";
+  const ext = audio.type.includes("wav") ? "wav" : audio.type.includes("mp4") ? "mp4" : "webm";
   form.append("file", audio, `audio.${ext}`);
   if (c.env.STT_MODEL) form.append("model", c.env.STT_MODEL);
   const res = await fetch(c.env.STT_URL!, {
@@ -220,7 +258,17 @@ app.post("/api/transcribe", async (c) => {
   });
   if (!res.ok) return c.json({ error: `Transcription failed (${res.status})` }, 502);
   const data = await res.json<{ text?: string }>();
-  return c.json({ text: data.text ?? "" });
+  return c.json({ text: data.text ?? "", ms: Date.now() - started, engine: "external" });
+});
+
+// Timing and failure reports from the app, so voice problems can be diagnosed
+// from the audit log. Never carries transcripts.
+const DIAG_EVENTS = new Set(["turn", "tts_fail", "wake", "playback"]);
+app.post("/api/diag", async (c) => {
+  const { event, data } = await c.req.json<{ event?: string; data?: unknown }>().catch(() => ({ event: undefined, data: undefined }));
+  if (!event || !DIAG_EVENTS.has(event)) return c.json({ error: "Unknown event" }, 400);
+  await audit(c.env, `client:${event}`, data);
+  return c.json({ ok: true });
 });
 
 // Natural voice for spoken replies (Workers AI). English only; the app falls
