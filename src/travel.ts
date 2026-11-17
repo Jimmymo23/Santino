@@ -27,18 +27,43 @@ const round = (n: number) => Math.round(n * 10) / 10;
 // ---------- where he is ----------
 
 /** The phone's latest position, if he shares it and it is recent. */
-export async function liveLocation(env: Env, maxAgeMin = 30): Promise<{ lat: number; lng: number } | null> {
+export async function liveLocation(env: Env, maxAgeMin = 30): Promise<{ lat: number; lng: number; ageMin: number } | null> {
   const raw = await secretGet(env, "last_location");
   if (!raw) return null;
   const l = JSON.parse(raw) as { lat: number; lng: number; at: string };
-  return Date.now() - Date.parse(l.at) <= maxAgeMin * MIN ? { lat: l.lat, lng: l.lng } : null;
+  const ageMin = Math.round((Date.now() - Date.parse(l.at)) / MIN);
+  return ageMin <= maxAgeMin ? { lat: l.lat, lng: l.lng, ageMin } : null;
+}
+
+const latLng = (lat: number, lng: number): Waypoint => ({ location: { latLng: { latitude: lat, longitude: lng } } });
+// Places saved from his phone's position are stored as "@lat,lng".
+const AT = /^@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/;
+const toWaypoint = (address: string): Waypoint => {
+  const m = address.match(AT);
+  return m ? latLng(Number(m[1]), Number(m[2])) : { address };
+};
+
+/** What Santino knows about where he is, for the system prompt. */
+export async function situation(env: Env): Promise<string> {
+  if (!env.GOOGLE_MAPS_KEY) return "Location: Google Maps is not connected.";
+  const [loc, places] = await Promise.all([
+    liveLocation(env, 24 * 60),
+    env.DB.prepare("SELECT label FROM places ORDER BY label").all<{ label: string }>(),
+  ]);
+  const p = places.results.map((r) => r.label);
+  const where = !loc
+    ? "His phone has not shared a location."
+    : loc.ageMin <= 30
+      ? `His phone shared its location ${loc.ageMin} min ago: travel_time and trip_watch without an origin start from where he is now.`
+      : `His phone last shared its location ${Math.round(loc.ageMin / 60)}h ago (too old to treat as where he is now).`;
+  return `Location: ${where} Saved places: ${p.length ? p.join(", ") : "none"}. If he says "I'm at home/the office now", save it with place_save using address "current location".`;
 }
 
 export async function saveLocation(env: Env, lat: number, lng: number, acc?: number): Promise<void> {
   await secretSet(env, "last_location", JSON.stringify({ lat, lng, acc, at: now() }));
 }
 
-async function place(env: Env, name: string): Promise<string | null> {
+export async function place(env: Env, name: string): Promise<string | null> {
   const r = await env.DB.prepare("SELECT address FROM places WHERE name = ?").bind(name.trim().toLowerCase()).first<{ address: string }>();
   return r?.address ?? null;
 }
@@ -47,15 +72,17 @@ type Waypoint = { address: string } | { location: { latLng: { latitude: number; 
 
 /** A saved place name, an address, or (no origin) his live location, else home. */
 async function resolve(env: Env, spot: string | null | undefined, isOrigin: boolean): Promise<{ wp: Waypoint; label: string }> {
-  if (spot && spot.trim()) {
+  if (spot && spot.trim() && !/^(here|current location|my location|where i am)$/i.test(spot.trim())) {
     const saved = await place(env, spot);
-    return { wp: { address: saved ?? spot.trim() }, label: spot.trim() };
+    return { wp: toWaypoint(saved ?? spot.trim()), label: spot.trim() };
   }
   if (!isOrigin) throw new Error("No destination given.");
   const here = await liveLocation(env);
-  if (here) return { wp: { location: { latLng: { latitude: here.lat, longitude: here.lng } } }, label: "your current location" };
+  if (here) return { wp: latLng(here.lat, here.lng), label: "your current location" };
   const home = await place(env, "home");
-  if (home) return { wp: { address: home }, label: "home" };
+  if (home) return { wp: toWaypoint(home), label: "home" };
+  const last = await liveLocation(env, 12 * 60); // better than nothing for a trip check
+  if (last) return { wp: latLng(last.lat, last.lng), label: "your last known location" };
   throw new Error("I don't know where you are. Turn on location sharing in Settings, or tell me your home address.");
 }
 
@@ -310,7 +337,8 @@ export const travelTools: Tool[] = [
   },
   {
     name: "place_save",
-    description: "Save a named place (e.g. home, office, the club) with its address, when he tells you where it is.",
+    description:
+      "Save a named place (e.g. home, office, the club) with its address. If he says he is there right now, pass address \"current location\" to save his phone's position.",
     input_schema: {
       type: "object",
       properties: { name: { type: "string" }, address: { type: "string" } },
@@ -319,10 +347,16 @@ export const travelTools: Tool[] = [
     risk: "auto",
     run: async (env, i) => {
       const label = String(i.name).trim().slice(0, 60);
+      let address = String(i.address).trim().slice(0, 300);
+      if (/^(here|current location|my location|where i am)$/i.test(address)) {
+        const here = await liveLocation(env, 120);
+        if (!here) throw new Error("His phone hasn't shared a recent location. Ask him to open Santino with location sharing on (Settings), or to say the address.");
+        address = `@${here.lat.toFixed(6)},${here.lng.toFixed(6)}`;
+      }
       await env.DB.prepare(
         "INSERT INTO places (name, label, address, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET label = excluded.label, address = excluded.address, updated_at = excluded.updated_at",
       )
-        .bind(label.toLowerCase(), label, String(i.address).trim().slice(0, 300), now())
+        .bind(label.toLowerCase(), label, address, now())
         .run();
       return { saved: label };
     },

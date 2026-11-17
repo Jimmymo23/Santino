@@ -207,3 +207,9 @@ See "Meetings" in `docs/SPEC.md` for the design and its limits.
 ## Later
 - Native wrapper, wake word, CarPlay, watch.
 - Realtime streaming voice.
+
+### Fixes — 2026-11-17
+- [x] Santino calls tools in the same reply instead of announcing "I'll check…" (effort medium + act-now rule)
+- [x] Santino knows when the phone shared its location; "I'm at home now" saves Home from it; trips fall back live → home → last known
+- [x] Cloudflare free voice allowance (10,000 neurons/day) used up → clear notice + one notification, mic backs off 15 min
+- [x] While asleep only the first 3 s are checked for "Santino" (cuts voice usage)

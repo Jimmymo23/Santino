@@ -337,6 +337,14 @@ addEventListener("pointerdown", () => {
   if (typeof hf !== "undefined" && hf.ctx && hf.ctx.state !== "running") hf.ctx.resume().then(paintState).catch(() => {});
   if (unlocked) return; unlocked = true; player.src = SILENT; player.play().catch(() => {});
 }, { passive: true });
+// Cloudflare's free voice allowance ran out: say it once, stop sending audio for a while.
+let aiLimitedUntil = 0;
+function aiLimited(msg) {
+  if (!/AI_LIMIT|daily free allowance/i.test(msg || "")) return false;
+  if (performance.now() > aiLimitedUntil) note("VOICE IS OFF FOR TODAY · CLOUDFLARE'S FREE VOICE ALLOWANCE IS USED UP · UPGRADE TO WORKERS PAID");
+  aiLimitedUntil = performance.now() + 15 * 60000;
+  return true;
+}
 function diag(event, data) {
   if (!token) return;
   fetch("/api/diag", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ event, data }) }).catch(() => {});
@@ -397,7 +405,7 @@ async function say(t, speaker, meta) {
   const id = sayId;
   if (ttsOn && token && !/[؀-ۿ]/.test(t)) {
     const voice = (text) => fetch("/api/speak", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ text, speaker }) })
-      .then((r) => { if (!r.ok) throw new Error("tts " + r.status); return r.blob(); });
+      .then(async (r) => { if (!r.ok) { const m = await r.text().catch(() => ""); aiLimited(m); throw new Error("tts " + r.status); } return r.blob(); });
     const pending = speechChunks(t).map(voice); // all requested at once; the short first one returns first
     pending.forEach((p) => p.catch(() => {}));
     let played = 0;
@@ -665,23 +673,24 @@ async function transcribe(blob, engine) {
 // A finished stretch of speech. Asleep: one transcription at a time on the fast
 // engine, and only the newest waiting stretch is kept, so background talk can
 // never build a backlog that delays the wake word. Awake: transcribe at once.
-function submitSegment(blob, segEnd) {
+function submitSegment(blob, segEnd, full) {
+  if (performance.now() < aiLimitedUntil) return; // voice allowance used up: don't keep trying
   if (!isAwake()) {
-    if (wakeBusy) { wakeNext = { blob, segEnd }; return; }
+    if (wakeBusy) { wakeNext = { blob, segEnd, full }; return; }
     wakeBusy = true; transcribing++;
-    transcribe(blob, "wake").catch(() => ({ text: "", engine: "error", round: 0 }))
-      .then((r) => (hf.queue = hf.queue.then(() => handle(r, blob, segEnd)).catch(() => {})))
+    transcribe(blob, "wake").catch((e) => { aiLimited(e.message); return { text: "", engine: "error", round: 0 }; })
+      .then((r) => (hf.queue = hf.queue.then(() => handle(r, full || blob, segEnd, Boolean(full))).catch(() => {})))
       .finally(() => {
         transcribing--; wakeBusy = false;
-        const n = wakeNext; wakeNext = null; if (n) submitSegment(n.blob, n.segEnd);
+        const n = wakeNext; wakeNext = null; if (n) submitSegment(n.blob, n.segEnd, n.full);
       });
     return;
   }
   transcribing++;
-  const p = transcribe(blob, "auto").catch(() => ({ text: "", engine: "error", round: 0 }));
-  hf.queue = hf.queue.then(async () => handle(await p, blob, segEnd)).catch(() => {}).then(() => { transcribing--; });
+  const p = transcribe(full || blob, "auto").catch((e) => { aiLimited(e.message); return { text: "", engine: "error", round: 0 }; });
+  hf.queue = hf.queue.then(async () => handle(await p, full || blob, segEnd)).catch(() => {}).then(() => { transcribing--; });
 }
-async function handle(r, blob, segEnd) {
+async function handle(r, blob, segEnd, trimmed) {
   if (!hfOn) return;
   let t = r.text;
   const speaking = mode === "speaking", thinking = mode === "thinking";
@@ -695,11 +704,13 @@ async function handle(r, blob, segEnd) {
     text = t.slice(w.end).trim();
     if (!text && t.slice(0, w.start).trim().split(/\s+/).length >= 3) text = t.slice(0, w.start).trim();
     arm(AWAKE_MS);
-    if (!text) { logHeard(t, r, "woke up"); return chime(); }
-    if (r.engine === "nova" && r.confidence < 0.85) { // unsure English (maybe Arabic): re-read it with the mixed-language engine
+    if (trimmed || (text && r.engine === "nova" && r.confidence < 0.85)) { // only the start was checked, or unsure English: read the whole thing
+      chime(); // he hears that the name was caught while the rest is read
       try { const r2 = await transcribe(blob, "auto"); const w2 = findWake(r2.text); const t2 = w2 ? r2.text.slice(w2.end).trim() : r2.text;
-        if (t2) { text = t2; r = { ...r2, round: r.round + r2.round }; } } catch {}
+        if (t2) { text = t2; r = { ...r2, round: r.round + r2.round }; } } catch (e) { aiLimited(e.message); }
+      if (!text) { logHeard(t, r, "woke up"); return; }
     }
+    if (!text) { logHeard(t, r, "woke up"); return chime(); }
   } else if (w) text = (t.slice(0, w.start) + " " + t.slice(w.end)).trim(); // name used mid-conversation
   if (SLEEP.test(text)) { logHeard(t, r, "end of conversation"); stopAll(true); sleepNow(); return note("STANDING BY"); }
   if (STOP.test(text)) { logHeard(t, r, "stop"); if (speaking || thinking) stopAll(true); pending = ""; pendingMeta = null; paintHearing(); clearTimeout(graceTimer); return arm(AWAKE_MS); }
@@ -734,7 +745,12 @@ function onAudio(e) {
   // Asleep, cut long stretches (TV, other people) at 8s so the name is checked quickly.
   if (hf.quiet >= 700 || hf.total >= (isAwake() ? 30000 : 8000)) {
     const frames = hf.seg, voiced = hf.voiced; hf.seg = null; hf.lastSegEnd = performance.now();
-    if (voiced >= 300) submitSegment(toWav(frames, hf.ctx.sampleRate), hf.lastSegEnd);
+    if (voiced >= 300) {
+      // Asleep, only the first 3s are checked for the name (he says it first); the rest is read only if it was there.
+      const full = toWav(frames, hf.ctx.sampleRate), head = Math.ceil((3 * hf.ctx.sampleRate) / 4096);
+      if (!isAwake() && frames.length > head + 2) submitSegment(toWav(frames.slice(0, head), hf.ctx.sampleRate), hf.lastSegEnd, full);
+      else submitSegment(full, hf.lastSegEnd);
+    }
     else scheduleGrace();
   }
 }

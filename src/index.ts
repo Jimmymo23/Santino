@@ -5,7 +5,7 @@ import { snapshot } from "./brief";
 import { runCron } from "./cron";
 import { googleAuthUrl, googleConnected, googleExchangeCode } from "./google";
 import { loginOptions, loginVerify, registerOptions, registerVerify } from "./passkeys";
-import { pushAll, pushPublicKey, subscribe } from "./push";
+import { notify, pushAll, pushPublicKey, subscribe } from "./push";
 import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "./security";
 import { listMemories } from "./memory";
 import { saveLocation } from "./travel";
@@ -205,6 +205,19 @@ app.post("/api/chat/cancel", async (c) => {
 // Whisper. Everything else uses Whisper, which handles Egyptian Arabic mixed
 // with English. The response carries `ms` and `engine` so the app can report
 // where time goes.
+// Cloudflare's free plan stops Workers AI after 10,000 neurons a day (error
+// 4006 / HTTP 429). Say so plainly, once a day by notification, instead of
+// failing silently.
+const AI_LIMIT = "AI_LIMIT: Cloudflare's free daily allowance for voice is used up. Upgrade to the Workers Paid plan to lift it.";
+const isAiLimit = (e: unknown) => /4006|daily free allocation|neurons|\b429\b/i.test(e instanceof Error ? e.message : String(e));
+async function aiLimitHit(env: Env): Promise<void> {
+  const day = new Date().toISOString().slice(0, 10);
+  if ((await kvGet(env, "ai_limit_day")) === day) return;
+  await kvSet(env, "ai_limit_day", day);
+  await audit(env, "ai_limit", {});
+  await notify(env, "travel", "Voice is off until tomorrow, sir: Cloudflare's free daily allowance for speech is used up. Upgrading Cloudflare to Workers Paid ($5/month) removes the limit.").catch(() => {});
+}
+
 const toB64 = (bytes: Uint8Array) => {
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -261,6 +274,7 @@ app.post("/api/transcribe", async (c) => {
         await record(c.env, "stt", seconds, seconds * prices(c.env).novaPerSecond);
         return c.json({ ...n, ms: Date.now() - started, engine: "nova" });
       } catch (e) {
+        if (isAiLimit(e)) { await aiLimitHit(c.env); return c.json({ error: AI_LIMIT }, 503); }
         await audit(c.env, "stt_nova_failed", { error: e instanceof Error ? e.message : String(e) });
       }
     } else if (engine === "auto") {
@@ -271,11 +285,13 @@ app.post("/api/transcribe", async (c) => {
         await record(c.env, "stt", seconds, seconds * (prices(c.env).novaPerSecond + prices(c.env).sttPerSecond));
         if (n.text && n.confidence >= 0.85 && !/[\u0600-\u06FF]/.test(n.text)) return c.json({ ...n, ms: Date.now() - started, engine: "nova" });
       } catch (e) {
+        if (isAiLimit(e)) { await aiLimitHit(c.env); return c.json({ error: AI_LIMIT }, 503); }
         await audit(c.env, "stt_nova_failed", { error: e instanceof Error ? e.message : String(e) });
       }
       try {
         return c.json({ text: await w, ms: Date.now() - started, engine: "whisper" });
       } catch (e) {
+        if (isAiLimit(e)) { await aiLimitHit(c.env); return c.json({ error: AI_LIMIT }, 503); }
         return c.json({ error: `Transcription failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
       }
     }
@@ -284,6 +300,7 @@ app.post("/api/transcribe", async (c) => {
       await record(c.env, "stt", seconds, seconds * prices(c.env).sttPerSecond);
       return c.json({ text, ms: Date.now() - started, engine: "whisper" });
     } catch (e) {
+      if (isAiLimit(e)) { await aiLimitHit(c.env); return c.json({ error: AI_LIMIT }, 503); }
       return c.json({ error: `Transcription failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
     }
   }
@@ -331,11 +348,13 @@ app.post("/api/speak", async (c) => {
     if (VOICES.includes(voice)) input.speaker = voice;
     const run = c.env.AI.run as unknown as (m: string, i: unknown, o: unknown) => Promise<Response>;
     const res = await run.call(c.env.AI, c.env.TTS_MODEL ?? "@cf/deepgram/aura-2-en", input, { returnRawResponse: true });
+    if (res.status === 429) { await aiLimitHit(c.env); return c.json({ error: AI_LIMIT }, 503); }
     if (!res.ok || !res.body) return c.json({ error: `Voice failed (${res.status})` }, 502);
     return new Response(res.body, {
       headers: { "content-type": res.headers.get("content-type") ?? "audio/mpeg", "cache-control": "no-store" },
     });
   } catch (e) {
+    if (isAiLimit(e)) { await aiLimitHit(c.env); return c.json({ error: AI_LIMIT }, 503); }
     return c.json({ error: `Voice failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
 });

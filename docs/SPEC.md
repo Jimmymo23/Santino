@@ -134,3 +134,5 @@ Rules:
 ## Non-goals (for now)
 - Multi-user / selling it as a product.
 - Autonomous spending.
+
+- `place_save` accepts address "current location" (saves the phone's live position, e.g. Home).
