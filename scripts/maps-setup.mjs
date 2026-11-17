@@ -4,7 +4,15 @@ import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });
-const ask = (q) => new Promise((r) => rl.question(q, (a) => r(a.trim())));
+// Buffer lines so a fast paste (or piped input) is never lost between prompts.
+const lines = []; let waiting = null;
+rl.on("line", (l) => (waiting ? waiting(l) : lines.push(l)));
+rl.on("close", () => { if (waiting) { console.error("\nInput ended before a key was entered."); process.exit(1); } });
+const ask = (q) => new Promise((r) => {
+  process.stdout.write(q);
+  const done = (a) => { waiting = null; r(a.trim()); };
+  if (lines.length) done(lines.shift()); else waiting = done;
+});
 
 console.log("Santino · Google Maps key\n  Where: Google Cloud → APIs & Services → Credentials → your Santino Maps key (starts with \"AIza\")");
 let key = "";
