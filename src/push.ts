@@ -144,6 +144,7 @@ const TITLES: Record<string, string> = {
   brief: "Morning brief",
   followup: "Follow-up",
   whatsapp: "WhatsApp reply",
+  travel: "Traffic",
 };
 
 /** Store a notification for the app and push it to the owner's devices. */

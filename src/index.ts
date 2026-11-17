@@ -8,6 +8,7 @@ import { loginOptions, loginVerify, registerOptions, registerVerify } from "./pa
 import { pushAll, pushPublicKey, subscribe } from "./push";
 import { isPaused, loginAllowed, loginFailed, loginSucceeded, setPaused } from "./security";
 import { listMemories } from "./memory";
+import { saveLocation } from "./travel";
 import { resolveApproval } from "./tools";
 import { extendBudget, overBudget, prices, record, setBudget, spendToday } from "./usage";
 import { type Env, audit, kvGet, kvSet } from "./types";
@@ -89,9 +90,29 @@ app.get("/api/status", async (c) =>
     ttsVoice: await currentVoice(c.env),
     owner: c.env.OWNER_NAME ?? "",
     paused: await isPaused(c.env),
+    maps: Boolean(c.env.GOOGLE_MAPS_KEY),
+    autoTravel: (await kvGet(c.env, "auto_travel")) !== "0",
     passkeys: (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM passkeys").first<{ n: number }>())?.n ?? 0,
   }),
 );
+
+// The phone's position, sent only when the owner turns on location sharing.
+// Only the latest position is kept, encrypted.
+app.post("/api/location", async (c) => {
+  const { lat, lng, acc } = await c.req.json<{ lat?: number; lng?: number; acc?: number }>().catch(() => ({}) as any);
+  if (typeof lat !== "number" || typeof lng !== "number" || Math.abs(lat) > 90 || Math.abs(lng) > 180) return c.json({ error: "Bad position" }, 400);
+  await saveLocation(c.env, lat, lng, typeof acc === "number" ? Math.round(acc) : undefined);
+  return c.json({ ok: true });
+});
+app.delete("/api/location", async (c) => {
+  await c.env.DB.prepare("DELETE FROM kv WHERE key = 'last_location'").run();
+  return c.json({ ok: true });
+});
+app.post("/api/settings/auto-travel", async (c) => {
+  const { on } = await c.req.json<{ on?: boolean }>().catch(() => ({ on: undefined }));
+  await kvSet(c.env, "auto_travel", on === false ? "0" : "1");
+  return c.json({ autoTravel: on !== false });
+});
 
 // Kill switch. Owner only; the model has no way to call these.
 app.post("/api/pause", async (c) => {

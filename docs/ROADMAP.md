@@ -92,6 +92,22 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       (proposed as an approval, not automatic).
 - [ ] Daily team digest for Jimmy.
 
+## Sprint 3b — Travel and traffic
+- [x] `travel_time` tool on the Google Maps Routes API (traffic-aware, Pro
+      SKU): minutes, usual minutes, route, leave-by for an arrival time.
+- [x] Saved places (`place_save`, `place_list`; migration 0005). Origin is
+      his phone's location when shared (⚙, latest position only, encrypted),
+      else "home".
+- [x] Trip watching (`trip_watch`, `trip_list`, `trip_cancel`; `trips`
+      table): cron re-checks traffic (every 30 → 15 → 5 → 2 min as departure
+      nears), pushes "leave by" 30 min ahead, "time to leave" / "running
+      late", and "traffic got worse" (≥10 min and ≥20%) or "traffic eased".
+- [x] Calendar events with a street address in the next 4h are watched
+      automatically (⚙ switch). Stops while paused; maps calls are metered.
+- [ ] Owner: enable billing + Routes API, create a restricted key,
+      `npm run maps:setup`.
+- [ ] Later: places search ("nearest pharmacy"), traffic in the morning brief.
+
 ## Sprint 4 — Memory
 The step from "smart tool" to "knows me". Everything after builds on it.
 - [x] `memories` table (migration 0003): fact, kind (person, preference,

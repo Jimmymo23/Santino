@@ -54,6 +54,7 @@ Personal voice + text assistant for one owner (Jimmy). Read `docs/SPEC.md`,
 - `src/push.ts` Web Push sender and `notify()`; `public/sw.js` shows them
 - `src/memory.ts` long-term memory tools and prompt context
 - `src/usage.ts` cost meter and daily budget
+- `src/travel.ts` Google Maps travel times, trip watching, places, location
 - `src/brief.ts` day snapshot for HUD tiles and briefs
 - `src/cron.ts` reminders, follow-ups, morning brief
 - `public/` the app

@@ -49,3 +49,9 @@ Local `wrangler dev` needs `wrangler login`, because the AI binding always
 runs remotely and counts against the account's Workers AI usage.
 
 Open `/?listen=1` to start listening immediately (use it for a phone shortcut).
+
+## Google Maps (travel times and traffic alerts)
+In the same Google Cloud project: enable billing, enable the **Routes API**,
+create an API key restricted to the Routes API, then run `npm run maps:setup`.
+Traffic-aware requests bill as "Compute Routes Pro", which has a monthly free
+allowance; Santino's cost meter counts them at list price.

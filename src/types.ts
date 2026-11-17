@@ -24,6 +24,10 @@ export interface Env {
   WHATSAPP_VERIFY_TOKEN?: string;
   WHATSAPP_APP_SECRET?: string;
   WHATSAPP_API_VERSION?: string;
+  /** Google Maps Platform key (Routes API) for travel times and traffic alerts. */
+  GOOGLE_MAPS_KEY?: string;
+  /** Override for the Routes API endpoint (local testing only). */
+  MAPS_ROUTES_URL?: string;
   STT_URL?: string;
   STT_KEY?: string;
   STT_MODEL?: string;

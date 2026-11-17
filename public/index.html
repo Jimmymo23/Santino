@@ -185,6 +185,11 @@
     <button id="pushTest" hidden>Send a test</button>
   </section>
   <section>
+    <p id="mapsState">Google Maps is not connected yet.</p>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="locShare"> Share this device's location for travel times</label>
+    <label style="display:flex;gap:10px;align-items:center"><input type="checkbox" id="autoTravel"> Traffic alerts for calendar events with an address</label>
+  </section>
+  <section>
     <p id="budgetState">Spending today: –</p>
     <label style="display:flex;gap:8px;align-items:center">Daily cap $ <input id="budgetCap" type="number" min="0.25" max="50" step="0.25" style="width:84px;background:var(--panel);color:var(--text);border:1px solid var(--line2);padding:8px;font:inherit"> <button id="budgetSave" style="align-self:auto">Save</button></label>
     <button id="budgetMore">Allow $1 more today</button>
@@ -524,7 +529,7 @@ function paintSpend(sp) {
   e.classList.toggle("warn", sp.spent >= sp.budget * .8 && sp.spent < sp.budget); e.classList.toggle("over", sp.spent >= sp.budget);
   const k = sp.byKind || {};
   if (document.activeElement !== $("budgetCap")) $("budgetCap").value = sp.base;
-  $("budgetState").textContent = `Spending today: ${money(sp.spent)} of ${money(sp.budget)} (thinking ${money(k.claude || 0)}, listening ${money(k.stt || 0)}, voice ${money(k.tts || 0)}). Estimates.`;
+  $("budgetState").textContent = `Spending today: ${money(sp.spent)} of ${money(sp.budget)} (thinking ${money(k.claude || 0)}, listening ${money(k.stt || 0)}, voice ${money(k.tts || 0)}, maps ${money(k.maps || 0)}). Estimates at list price.`;
 }
 $("budgetSave").onclick = async () => { try { paintSpend(await api("/api/budget", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ usd: Number($("budgetCap").value) }) })); } catch (e) { $("budgetState").textContent = e.message; } };
 $("budgetMore").onclick = async () => { try { paintSpend(await api("/api/budget/extend", { method: "POST" })); } catch (e) { note(e.message); } };
@@ -908,6 +913,29 @@ $("pushTest").onclick = async () => {
   catch (e) { paintPush(e.message); }
 };
 
+// ---------- location for travel times ----------
+// Only when he turns it on; only the latest position is sent, while the app is open.
+let locOn = false, locTimer = null;
+try { locOn = localStorage.getItem("santino_loc") === "1"; } catch {}
+function sendLocation() {
+  if (!locOn || !token || !("geolocation" in navigator)) return;
+  navigator.geolocation.getCurrentPosition(
+    (p) => api("/api/location", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }) }).catch(() => {}),
+    (e) => { if (e.code === 1) { locOn = false; $("locShare").checked = false; try { localStorage.setItem("santino_loc", "0"); } catch {} $("mapsState").textContent = "Location permission was refused for Santino in this device's settings."; } },
+    { enableHighAccuracy: false, maximumAge: 5 * 60000, timeout: 15000 });
+}
+function startLocation() { clearInterval(locTimer); if (locOn) { sendLocation(); locTimer = setInterval(() => { if (!document.hidden) sendLocation(); }, 10 * 60000); } }
+$("locShare").checked = locOn;
+$("locShare").onchange = () => {
+  locOn = $("locShare").checked; try { localStorage.setItem("santino_loc", locOn ? "1" : "0"); } catch {}
+  if (locOn) startLocation(); else { clearInterval(locTimer); api("/api/location", { method: "DELETE" }).catch(() => {}); }
+};
+$("autoTravel").onchange = () => api("/api/settings/auto-travel", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: $("autoTravel").checked }) }).catch((e) => note(e.message));
+function paintMaps(status) {
+  $("mapsState").textContent = status.maps ? "Google Maps is connected: travel times with live traffic, leave-now and traffic alerts." : "Google Maps is not connected yet.";
+  $("locShare").disabled = $("autoTravel").disabled = !status.maps; $("autoTravel").checked = status.maps && status.autoTravel;
+}
+
 let handsFreePref = false;
 try { handsFreePref = localStorage.getItem("santino_handsfree") === "1" || localStorage.getItem("santino_autolisten") === "1"; } catch {}
 $("handsFree").checked = handsFreePref;
@@ -928,7 +956,7 @@ setInterval(() => { if (token && pkOnDevice && Date.now() - lastActive > 15 * 60
 function signedIn(t) { token = t; lastActive = Date.now(); try { localStorage.setItem("santino_token", t); } catch {} $("login").hidden = true; start(); }
 function showLogin() {
   token = null; try { localStorage.removeItem("santino_token"); } catch {}
-  hush(); stopHandsFree(); cancelTurn(); log.textContent = "";
+  hush(); stopHandsFree(); cancelTurn(); clearInterval(locTimer); log.textContent = "";
   $("pkLogin").hidden = !hasPK; $("login").hidden = false;
 }
 $("login").onsubmit = async (e) => {
@@ -948,7 +976,7 @@ async function start() {
     $("lGoogle").querySelector(".dot").classList.toggle("on", status.google);
     $("dWa").classList.toggle("on", status.whatsapp); $("dVox").classList.toggle("on", status.voice);
     mic.disabled = !status.voice; ttsOn = Boolean(status.tts); paintVoices(status.ttsVoice);
-    paintPaused(status.paused); paintSettings((settingsCount = status.passkeys)); paintPush();
+    paintPaused(status.paused); paintSettings((settingsCount = status.passkeys)); paintPush(); paintMaps(status); if (status.maps) startLocation();
     const h = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", hour12: false }).format(new Date()));
     note(`SYSTEMS ONLINE · GOOD ${h >= 5 && h < 12 ? "MORNING" : h >= 12 && h < 18 ? "AFTERNOON" : "EVENING"}${owner ? ", " + owner.toUpperCase() : ""}`);
     if (!status.google) note("GOOGLE NOT LINKED · TAP GGL TO CONNECT");
@@ -964,7 +992,7 @@ if (token) start(); else showLogin();
 setInterval(pollInbox, 20000); setInterval(pollDash, 60000);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  pollInbox(); pollDash();
+  pollInbox(); pollDash(); sendLocation();
   // Coming back to the app: the phone may have stopped the mic or paused audio while it was in the background.
   if (hfOn) {
     const dead = !hf.stream || hf.stream.getAudioTracks().every((t) => t.readyState === "ended");

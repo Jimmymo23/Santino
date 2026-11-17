@@ -51,6 +51,12 @@ and executes them after a spoken or tapped approval.
 - Scheduled follow-ups: on a task's follow-up time, a WhatsApp nudge is
   drafted and placed in the approval queue.
 
+### Travel (built)
+- Travel time with live traffic from his location or home to any address or
+  saved place; leave-by times.
+- Watched trips and calendar events with an address: notification 30 min
+  before leaving, at leave time, and when traffic gets worse or eases.
+
 ### Phase 2 — Knows me
 - Long-term memory of people, preferences and decisions, with a decision log
   and a screen to review and delete what is stored. (Built: saved only when

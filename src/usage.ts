@@ -14,7 +14,7 @@ export const prices = (env: Env) => ({
   ttsPerChar: 0.03 / 1000,
 });
 
-export async function record(env: Env, kind: "claude" | "stt" | "tts", units: number, cost: number): Promise<void> {
+export async function record(env: Env, kind: "claude" | "stt" | "tts" | "maps", units: number, cost: number): Promise<void> {
   const { ymd } = todayBounds(env);
   await env.DB.prepare(
     `INSERT INTO usage (day, kind, units, cost) VALUES (?, ?, ?, ?)

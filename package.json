@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "db:local": "wrangler d1 migrations apply santino --local",
     "db:remote": "wrangler d1 migrations apply santino --remote",
-    "google:setup": "node scripts/google-setup.mjs"
+    "google:setup": "node scripts/google-setup.mjs",
+    "maps:setup": "node scripts/maps-setup.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0"

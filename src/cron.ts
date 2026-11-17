@@ -2,8 +2,9 @@ import { runAgent } from "./agent";
 import { todayBounds } from "./brief";
 import { isPaused } from "./security";
 import { queueApproval } from "./tools";
+import { runTravel } from "./travel";
 import { notify } from "./push";
-import { type Env, kvGet, kvSet, now } from "./types";
+import { type Env, audit, kvGet, kvSet, now } from "./types";
 
 export async function runCron(env: Env): Promise<void> {
   const t = now();
@@ -21,6 +22,15 @@ export async function runCron(env: Env): Promise<void> {
   // Kill switch: reminders above are private notes to the owner and still fire.
   // Everything below drafts, queues or calls paid services, so it stops.
   if (await isPaused(env)) return;
+
+  // Trips: travel times with live traffic, leave-now and traffic alerts.
+  // They call a paid service, so they stop while paused.
+  try {
+    await runTravel(env);
+  } catch (e) {
+    await audit(env, "travel_failed", { error: e instanceof Error ? e.message : String(e) });
+  }
+
 
   // 2. Task follow-ups: draft a WhatsApp nudge and queue it for approval.
   const follow = await env.DB.prepare(

@@ -1,6 +1,7 @@
 import { briefTools } from "./brief";
 import { googleTools } from "./google";
 import { memoryTools } from "./memory";
+import { travelTools } from "./travel";
 import { PAUSED_MESSAGE, isPaused } from "./security";
 import { type Env, type Tool, audit, now } from "./types";
 import { whatsappTools } from "./whatsapp";
@@ -157,7 +158,7 @@ const coreTools: Tool[] = [
   },
 ];
 
-export const tools: Tool[] = [...coreTools, ...memoryTools, ...briefTools, ...googleTools, ...whatsappTools];
+export const tools: Tool[] = [...coreTools, ...memoryTools, ...briefTools, ...googleTools, ...travelTools, ...whatsappTools];
 const byName = new Map(tools.map((t) => [t.name, t]));
 
 /** Queue an action for the owner's approval. Used by the agent and by cron. */
