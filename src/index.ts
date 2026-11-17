@@ -222,7 +222,7 @@ async function whisper(env: Env, bytes: Uint8Array): Promise<string> {
   return text === STT_HINT ? "" : text; // Whisper sometimes echoes the hint back on silent audio
 }
 
-async function nova(env: Env, bytes: Uint8Array, type: string): Promise<string> {
+async function nova(env: Env, bytes: Uint8Array, type: string): Promise<{ text: string; confidence: number }> {
   const run = env.AI!.run as unknown as (m: string, i: unknown) => Promise<any>;
   const out = await run.call(env.AI, "@cf/deepgram/nova-3", {
     audio: { body: new Blob([bytes], { type }).stream(), contentType: type },
@@ -231,9 +231,10 @@ async function nova(env: Env, bytes: Uint8Array, type: string): Promise<string> 
     punctuate: true,
     smart_format: true,
   });
-  const t = out?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? out?.text;
+  const alt = out?.results?.channels?.[0]?.alternatives?.[0];
+  const t = alt?.transcript ?? out?.text;
   if (typeof t !== "string") throw new Error("Unexpected Nova response");
-  return t.trim();
+  return { text: t.trim(), confidence: typeof alt?.confidence === "number" ? alt.confidence : 0 };
 }
 
 app.post("/api/transcribe", async (c) => {
@@ -248,14 +249,34 @@ app.post("/api/transcribe", async (c) => {
 
   if (!c.env.STT_URL && c.env.AI) {
     const bytes = new Uint8Array(await audio.arrayBuffer());
-    const wantWake = c.req.query("engine") === "wake" || c.req.query("engine") === "nova";
-    if (wantWake) {
+    const engine = c.req.query("engine");
+    const type = audio.type || "audio/wav";
+    // Measured on the live account: Nova answers in ~1-2s, Whisper anywhere
+    // from 1 to 9s. Nova is English-only, so for normal speech ("auto") both
+    // run at once and Nova's answer is used only when it is clean, confident
+    // English; otherwise Whisper's mixed-language answer is awaited.
+    if (engine === "wake" || engine === "nova") {
       try {
-        const text = await nova(c.env, bytes, audio.type || "audio/wav");
+        const n = await nova(c.env, bytes, type);
         await record(c.env, "stt", seconds, seconds * prices(c.env).novaPerSecond);
-        return c.json({ text, ms: Date.now() - started, engine: "nova" });
+        return c.json({ ...n, ms: Date.now() - started, engine: "nova" });
       } catch (e) {
         await audit(c.env, "stt_nova_failed", { error: e instanceof Error ? e.message : String(e) });
+      }
+    } else if (engine === "auto") {
+      const w = whisper(c.env, bytes);
+      w.catch(() => {}); // may finish after we have answered
+      try {
+        const n = await nova(c.env, bytes, type);
+        await record(c.env, "stt", seconds, seconds * (prices(c.env).novaPerSecond + prices(c.env).sttPerSecond));
+        if (n.text && n.confidence >= 0.85 && !/[\u0600-\u06FF]/.test(n.text)) return c.json({ ...n, ms: Date.now() - started, engine: "nova" });
+      } catch (e) {
+        await audit(c.env, "stt_nova_failed", { error: e instanceof Error ? e.message : String(e) });
+      }
+      try {
+        return c.json({ text: await w, ms: Date.now() - started, engine: "whisper" });
+      } catch (e) {
+        return c.json({ error: `Transcription failed: ${e instanceof Error ? e.message : String(e)}` }, 502);
       }
     }
     try {

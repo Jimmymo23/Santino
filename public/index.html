@@ -659,8 +659,8 @@ function scheduleGrace() {
 }
 async function transcribe(blob, engine) {
   const t0 = performance.now();
-  const out = await api("/api/transcribe" + (engine === "wake" ? "?engine=wake" : ""), { method: "POST", headers: { "content-type": "audio/wav" }, body: blob });
-  return { text: (out.text || "").trim(), ms: out.ms || 0, engine: out.engine || engine, round: Math.round(performance.now() - t0) };
+  const out = await api("/api/transcribe?engine=" + engine, { method: "POST", headers: { "content-type": "audio/wav" }, body: blob });
+  return { text: (out.text || "").trim(), ms: out.ms || 0, engine: out.engine || engine, confidence: out.confidence ?? 1, round: Math.round(performance.now() - t0) };
 }
 // A finished stretch of speech. Asleep: one transcription at a time on the fast
 // engine, and only the newest waiting stretch is kept, so background talk can
@@ -678,7 +678,7 @@ function submitSegment(blob, segEnd) {
     return;
   }
   transcribing++;
-  const p = transcribe(blob, "whisper").catch(() => ({ text: "", engine: "error", round: 0 }));
+  const p = transcribe(blob, "auto").catch(() => ({ text: "", engine: "error", round: 0 }));
   hf.queue = hf.queue.then(async () => handle(await p, blob, segEnd)).catch(() => {}).then(() => { transcribing--; });
 }
 async function handle(r, blob, segEnd) {
@@ -696,8 +696,8 @@ async function handle(r, blob, segEnd) {
     if (!text && t.slice(0, w.start).trim().split(/\s+/).length >= 3) text = t.slice(0, w.start).trim();
     arm(AWAKE_MS);
     if (!text) { logHeard(t, r, "woke up"); return chime(); }
-    if (r.engine === "nova") { // the fast engine is English-only: re-read the command with the mixed-language one
-      try { const r2 = await transcribe(blob, "whisper"); const w2 = findWake(r2.text); const t2 = w2 ? r2.text.slice(w2.end).trim() : r2.text;
+    if (r.engine === "nova" && r.confidence < 0.85) { // unsure English (maybe Arabic): re-read it with the mixed-language engine
+      try { const r2 = await transcribe(blob, "auto"); const w2 = findWake(r2.text); const t2 = w2 ? r2.text.slice(w2.end).trim() : r2.text;
         if (t2) { text = t2; r = { ...r2, round: r.round + r2.round }; } } catch {}
     }
   } else if (w) text = (t.slice(0, w.start) + " " + t.slice(w.end)).trim(); // name used mid-conversation

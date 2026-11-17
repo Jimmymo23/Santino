@@ -76,6 +76,9 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       split words, Arabic spellings); finished sentences sent 0.25s after the
       transcript; ⚙ → "What Santino heard" (on device only);
       `client:turn` / `client:tts_fail` timings in `audit`.
+- [x] Live measurement: Whisper 1-9s per phrase, Nova-3 1-2s. Awake speech
+      now uses `engine=auto` (both at once; Nova's answer when it is
+      confident English, else Whisper for Arabic/mixed).
 - [ ] Streaming replies (speak while the model is still writing) and an
       on-device wake word, if latency is still not good enough.
 - [ ] Voice approval read-back ("Send this to Ahmed? ...").
@@ -104,8 +107,8 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       late", and "traffic got worse" (≥10 min and ≥20%) or "traffic eased".
 - [x] Calendar events with a street address in the next 4h are watched
       automatically (⚙ switch). Stops while paused; maps calls are metered.
-- [ ] Owner: enable billing + Routes API, create a restricted key,
-      `npm run maps:setup`.
+- [x] Billing + Routes API on, key "Santino Maps" restricted to the Routes
+      API, saved; live check: Sheikh Zayed → New Giza 24 min, 14.7 km.
 - [ ] Later: places search ("nearest pharmacy"), traffic in the morning brief.
 
 ## Sprint 4 — Memory
