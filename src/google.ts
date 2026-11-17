@@ -99,6 +99,33 @@ const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 const CAL = "https://www.googleapis.com/calendar/v3/calendars/primary";
 const SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
 
+/** "Tue 17 Nov, 18:45-20:15" in the owner's timezone, for approval cards. */
+function when(start: string, end?: string): string {
+  const tz = "Africa/Cairo";
+  const d = new Date(start);
+  const day = d.toLocaleDateString("en-GB", { timeZone: tz, weekday: "short", day: "numeric", month: "short" });
+  const t = (x: Date) => x.toLocaleTimeString("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit" });
+  return `${day}, ${t(d)}${end ? `-${t(new Date(end))}` : ""}`;
+}
+
+const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+
+/** An existing event with the same title starting at the same minute, if any. */
+async function sameEvent(env: Env, title: string, start: Date): Promise<{ id: string; htmlLink: string } | null> {
+  const p = new URLSearchParams({
+    timeMin: new Date(start.getTime() - 60_000).toISOString(),
+    timeMax: new Date(start.getTime() + 60_000).toISOString(),
+    singleEvents: "true",
+    maxResults: "20",
+  });
+  const r = await g(env, `${CAL}/events?${p}`);
+  const want = norm(title);
+  const hit = (r.items ?? []).find(
+    (e: any) => norm(e.summary ?? "") === want && Math.abs(Date.parse(e.start?.dateTime ?? e.start?.date) - start.getTime()) < 60_000,
+  );
+  return hit ? { id: hit.id, htmlLink: hit.htmlLink } : null;
+}
+
 export const googleTools: Tool[] = [
   {
     name: "gmail_search",
@@ -202,13 +229,14 @@ export const googleTools: Tool[] = [
   {
     name: "calendar_create",
     description:
-      "Create a calendar event, optionally inviting attendees and adding a Google Meet link. Requires owner approval.",
+      "Create a calendar event, optionally with a location, attendees and a Google Meet link. Check calendar_agenda first so you never create a duplicate. Requires owner approval.",
     input_schema: {
       type: "object",
       properties: {
         title: { type: "string" },
         start: { type: "string", description: "ISO datetime with offset" },
         end: { type: "string", description: "ISO datetime with offset" },
+        location: { type: "string", description: "street address or place name; lets Santino send traffic alerts" },
         attendees: { type: "array", items: { type: "string" }, description: "emails" },
         description: { type: "string" },
         meet: { type: "boolean" },
@@ -217,13 +245,18 @@ export const googleTools: Tool[] = [
     },
     risk: "approval",
     summarize: (i) =>
-      `Meeting: ${i.title}\n${i.start} → ${i.end}${i.attendees?.length ? `\nInvite: ${i.attendees.join(", ")}` : ""}`,
+      `Meeting: ${i.title}\n${when(i.start, i.end)}${i.location ? `\nAt: ${i.location}` : ""}${i.attendees?.length ? `\nInvite: ${i.attendees.join(", ")}` : ""}`,
     run: async (env, i) => {
+      // Safety net against duplicates: an event with the same title and start already there is reused.
+      const start = new Date(i.start), end = new Date(i.end);
+      const existing = await sameEvent(env, i.title, start);
+      if (existing) return { created: false, already_exists: true, id: existing.id, link: existing.htmlLink };
       const body: any = {
         summary: i.title,
         description: i.description,
-        start: { dateTime: new Date(i.start).toISOString() },
-        end: { dateTime: new Date(i.end).toISOString() },
+        location: i.location,
+        start: { dateTime: start.toISOString() },
+        end: { dateTime: end.toISOString() },
         attendees: (i.attendees ?? []).map((email: string) => ({ email })),
       };
       if (i.meet)
@@ -234,7 +267,63 @@ export const googleTools: Tool[] = [
         method: "POST",
         body: JSON.stringify(body),
       });
-      return { created: true, link: r.htmlLink, meet: r.hangoutLink };
+      return { created: true, id: r.id, link: r.htmlLink, meet: r.hangoutLink };
+    },
+  },
+  {
+    name: "calendar_update",
+    description:
+      "Change an existing calendar event by id (from calendar_agenda): title, time, location or description. Attendees are notified. Requires owner approval.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        title: { type: "string", description: "current title, shown on the approval card; or the new title if renaming" },
+        new_title: { type: "string" },
+        start: { type: "string", description: "new start, ISO datetime with offset" },
+        end: { type: "string", description: "new end, ISO datetime with offset" },
+        location: { type: "string" },
+        description: { type: "string" },
+      },
+      required: ["id", "title"],
+    },
+    risk: "approval",
+    summarize: (i) =>
+      `Change event: ${i.title}${i.new_title ? `\nRename to: ${i.new_title}` : ""}${i.start ? `\nMove to: ${when(i.start, i.end)}` : ""}${i.location ? `\nAt: ${i.location}` : ""}`,
+    run: async (env, i) => {
+      const patch: any = {};
+      if (i.new_title) patch.summary = i.new_title;
+      if (i.start) patch.start = { dateTime: new Date(i.start).toISOString() };
+      if (i.end) patch.end = { dateTime: new Date(i.end).toISOString() };
+      if (i.location !== undefined) patch.location = i.location;
+      if (i.description !== undefined) patch.description = i.description;
+      const r = await g(env, `${CAL}/events/${encodeURIComponent(i.id)}?sendUpdates=all`, { method: "PATCH", body: JSON.stringify(patch) });
+      return { updated: true, link: r.htmlLink };
+    },
+  },
+  {
+    name: "calendar_delete",
+    description:
+      "Delete a calendar event by id (from calendar_agenda), e.g. a duplicate or a cancelled plan. Attendees get a cancellation. Requires owner approval.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        title: { type: "string", description: "the event's title, shown on the approval card" },
+        start: { type: "string", description: "the event's start, shown on the approval card" },
+      },
+      required: ["id", "title"],
+    },
+    risk: "approval",
+    summarize: (i) => `Delete event: ${i.title}${i.start ? `\n${when(i.start)}` : ""}`,
+    run: async (env, i) => {
+      const res = await fetch(`${CAL}/events/${encodeURIComponent(i.id)}?sendUpdates=all`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${await accessToken(env)}` },
+      });
+      if (res.status === 404 || res.status === 410) return { deleted: true, note: "It was already gone." };
+      if (!res.ok) throw new Error(`Google API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      return { deleted: true };
     },
   },
   {

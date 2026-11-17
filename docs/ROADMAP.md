@@ -95,6 +95,16 @@ hand and read every draft. Standing rules (Sprint 7) come only after that.
       (proposed as an approval, not automatic).
 - [ ] Daily team digest for Jimmy.
 
+## Fixes from real use
+- [x] Calendar: `calendar_update` and `calendar_delete` (approval), location
+      on `calendar_create`, duplicate guard (same title and start minute is
+      reused, not created again), approval cards show Cairo times.
+- [x] The same pending approval is never queued twice; `trip_watch` reuses an
+      active trip to the same place within 15 min; calendar auto-watch skips
+      events he already set a trip for.
+- [x] Prompt: fix your own mistakes with your tools, never tell him to do it
+      by hand; check tools before saying you can't.
+
 ## Sprint 3b — Travel and traffic
 - [x] `travel_time` tool on the Google Maps Routes API (traffic-aware, Pro
       SKU): minutes, usual minutes, route, leave-by for an arrival time.

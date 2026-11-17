@@ -165,6 +165,11 @@ const byName = new Map(tools.map((t) => [t.name, t]));
 export async function queueApproval(env: Env, toolName: string, input: unknown): Promise<string> {
   const tool = byName.get(toolName);
   if (!tool) throw new Error(`Unknown tool ${toolName}`);
+  // The same action already waiting for approval is not queued twice.
+  const same = await env.DB.prepare("SELECT id FROM approvals WHERE status = 'pending' AND tool = ? AND input = ?")
+    .bind(toolName, JSON.stringify(input))
+    .first<{ id: string }>();
+  if (same) return same.id;
   const id = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO approvals (id, tool, input, summary, created_at) VALUES (?, ?, ?, ?, ?)")
     .bind(id, toolName, JSON.stringify(input), tool.summarize?.(input) ?? `${toolName}: ${JSON.stringify(input)}`, now())

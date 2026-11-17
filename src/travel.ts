@@ -188,6 +188,13 @@ async function watchCalendar(env: Env): Promise<void> {
     .catch(() => [])) as { id: string; title?: string; start?: string; location?: string }[];
   for (const e of events) {
     if (!e.location || !e.start || !/T/.test(e.start) || /meet\.google|zoom\.us|teams\.microsoft|^https?:/i.test(e.location)) continue;
+    // Already watching a trip he set up himself for about the same time: don't add a second.
+    const mine = await env.DB.prepare(
+      "SELECT id FROM trips WHERE status = 'active' AND source = 'manual' AND ABS(strftime('%s', arrive_by) - strftime('%s', ?)) <= 900",
+    )
+      .bind(new Date(e.start).toISOString())
+      .first();
+    if (mine) continue;
     await env.DB.prepare(
       `INSERT OR IGNORE INTO trips (title, destination, arrive_by, source, event_id, next_check_at, created_at)
        VALUES (?, ?, ?, 'calendar', ?, ?, ?)`,
@@ -263,6 +270,12 @@ export const travelTools: Tool[] = [
       if (!env.GOOGLE_MAPS_KEY) throw new Error("Google Maps is not connected yet (GOOGLE_MAPS_KEY is not set).");
       const arrive = new Date(i.arrive_by);
       if (!(arrive.getTime() > Date.now())) throw new Error("That time has already passed.");
+      const dup = await env.DB.prepare(
+        "SELECT id FROM trips WHERE status = 'active' AND ABS(strftime('%s', arrive_by) - strftime('%s', ?)) <= 900 AND lower(destination) = lower(?)",
+      )
+        .bind(arrive.toISOString(), String(i.destination))
+        .first<{ id: number }>();
+      if (dup) return { already_watching: dup.id };
       const r = await env.DB.prepare(
         "INSERT INTO trips (title, destination, origin, arrive_by, buffer_min, mode, next_check_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
